@@ -30,20 +30,29 @@ The project has its own uv-managed `.venv`; it does not use the base Python envi
 
 ## Setup
 
-Requirements: Python 3.12+, [uv](https://docs.astral.sh/uv/), and Pi.
+Requirements: Python 3.12+, [uv](https://docs.astral.sh/uv/), Node.js/npm, and Pi 0.84.4 or a compatible release.
 
 ```bash
-cd ~/code/ghostwriter
-uv sync
-./scripts/install-pi-bridge
+git clone <repository-url> ghostwriter
+cd ghostwriter
+./scripts/setup
 ```
 
-Restart Pi after installing the bridge, or run `/reload` in Pi. The extension command `/ghostwriter-status` shows that Pi session's name, working directory, model, thinking level, and PID.
+The setup script installs locked Python and TypeScript dependencies, builds both packages, installs the `ghostwriter` command, and registers this repository through Pi's package manager. Restart Pi or run `/reload` afterward.
 
-Run the composer in another Ghostty pane:
+Start the composer in another terminal pane:
 
 ```bash
-cd ~/code/ghostwriter
+ghostwriter
+```
+
+The Pi command `/ghostwriter-status` shows that session's name, working directory, model, thinking level, and PID.
+
+Contributors who do not want user-level installation can instead run:
+
+```bash
+uv sync --dev
+npm ci
 uv run ghostwriter
 ```
 
@@ -113,18 +122,28 @@ Textual UI ── PiBridgeClient ── Unix socket ── Pi extension
      └────── RewriteSession ── isolated Pi RPC process
 ```
 
-`src/ghostwriter/pi.py` owns Pi target discovery, attachment serialization, and injection. `pi-extension.ts` owns the Pi-side session registry and editor replacement. See [`docs/pi-bridge.md`](docs/pi-bridge.md) for the protocol.
+`src/ghostwriter/pi.py` owns Pi target discovery, attachment serialization, and injection. `extensions/ghostwriter.ts` owns the Pi-side session registry and editor replacement.
+
+Developer references:
+
+- [`docs/architecture.md`](docs/architecture.md) — components, state, and end-to-end flows
+- [`docs/pi-bridge.md`](docs/pi-bridge.md) — self-contained Pi APIs, lifecycle, registry, and wire protocol
+- [`docs/rewrite.md`](docs/rewrite.md) — isolated RPC transformation and placeholder integrity
+- [`docs/development.md`](docs/development.md) — setup, build, tests, debugging, and releases
+- [`AGENTS.md`](AGENTS.md) — concise operational guidance for coding Agents
 
 ## Development
 
 ```bash
-uv sync --dev
-uv run ruff check .
-uv run pytest
+./scripts/check
+./scripts/build
 ```
 
-Uninstall the Pi bridge with:
+See [`CONTRIBUTING.md`](CONTRIBUTING.md) before submitting changes.
+
+Uninstall with:
 
 ```bash
-./scripts/uninstall-pi-bridge
+./scripts/uninstall-pi-extension
+uv tool uninstall ghostwriter
 ```

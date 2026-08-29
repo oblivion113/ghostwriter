@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$root"
+
+npm run clean
+rm -rf dist
+npm run build
+uv build
+
+printf 'Built Pi extension: %s/build/pi/ghostwriter.js\n' "$root"
+printf 'Built Python distributions in %s/dist/\n' "$root"

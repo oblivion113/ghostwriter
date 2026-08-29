@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+legacy_extension="${PI_AGENT_DIR:-$HOME/.pi/agent}/extensions/ghostwriter.ts"
+
+if ! command -v pi >/dev/null 2>&1; then
+  printf 'Pi is required but was not found on PATH.\n' >&2
+  exit 1
+fi
+
+# Releases before 0.3 installed a direct symlink. Remove only symlinks so a
+# user-owned extension file is never overwritten.
+if [[ -L "$legacy_extension" ]]; then
+  rm "$legacy_extension"
+  printf 'Removed legacy extension symlink: %s\n' "$legacy_extension"
+fi
+
+pi install "$root"
+printf 'Installed Ghostwriter as a local Pi package from %s\n' "$root"
+printf 'Restart Pi or run /reload inside Pi.\n'

@@ -8,8 +8,9 @@ wheels/
 .pytest_cache/
 .ruff_cache/
 
-# Virtual environments
+# Virtual environments and Node dependencies
 .venv/
+node_modules/
 
 # Local task notes
 prompt.txt

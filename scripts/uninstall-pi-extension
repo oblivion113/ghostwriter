@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+legacy_extension="${PI_AGENT_DIR:-$HOME/.pi/agent}/extensions/ghostwriter.ts"
+
+if command -v pi >/dev/null 2>&1; then
+  pi remove "$root"
+else
+  printf 'Pi was not found on PATH; its package setting was not changed.\n' >&2
+fi
+
+if [[ -L "$legacy_extension" ]]; then
+  rm "$legacy_extension"
+  printf 'Removed legacy extension symlink: %s\n' "$legacy_extension"
+fi

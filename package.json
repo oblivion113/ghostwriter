@@ -1,0 +1,41 @@
+{
+  "name": "ghostwriter-pi-composer",
+  "version": "0.2.0",
+  "description": "Pi package for the Ghostwriter terminal prompt composer",
+  "type": "module",
+  "license": "MIT",
+  "keywords": [
+    "pi-package",
+    "pi-extension",
+    "terminal",
+    "prompt-editor"
+  ],
+  "files": [
+    "extensions",
+    "docs",
+    "AGENTS.md",
+    "CONTRIBUTING.md",
+    "README.md",
+    "CHANGELOG.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "check": "tsc --noEmit -p tsconfig.json",
+    "clean": "rm -rf build/pi",
+    "prepack": "npm run build"
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*"
+  },
+  "devDependencies": {
+    "@earendil-works/pi-coding-agent": "0.84.4",
+    "@types/node": "22.19.19",
+    "typescript": "5.9.3"
+  },
+  "pi": {
+    "extensions": [
+      "./extensions/ghostwriter.ts"
+    ]
+  }
+}

@@ -1,0 +1,30 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$root"
+
+for command in uv npm pi; do
+  if ! command -v "$command" >/dev/null 2>&1; then
+    printf 'Required command not found: %s\n' "$command" >&2
+    exit 1
+  fi
+done
+
+printf 'Setting up Python environment...\n'
+uv sync --dev
+
+printf 'Installing TypeScript development dependencies...\n'
+npm ci
+
+printf 'Building Python and Pi packages...\n'
+./scripts/build
+
+printf 'Installing the Ghostwriter command...\n'
+uv tool install --force --editable "$root"
+
+printf 'Installing the Pi extension package...\n'
+./scripts/install-pi-extension
+
+printf '\nSetup complete. Start Ghostwriter with: ghostwriter\n'
+printf 'Restart Pi or run /reload before selecting a Pi session.\n'
