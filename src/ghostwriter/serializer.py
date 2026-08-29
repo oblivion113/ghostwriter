@@ -28,11 +28,18 @@ def _serialize_attachment(attachment: Attachment, cwd: Path) -> str:
 
 def serialize_draft(draft: Draft, cwd: Path) -> str:
     text = draft.text.rstrip()
-    references = [_serialize_attachment(item, cwd) for item in draft.attachments]
-    if not references:
+    orphaned_references: list[str] = []
+    for attachment in draft.attachments:
+        reference = _serialize_attachment(attachment, cwd)
+        if attachment.editor_token in text:
+            text = text.replace(attachment.editor_token, reference)
+        else:
+            orphaned_references.append(reference)
+
+    if not orphaned_references:
         return text
 
     attachment_block = "Referenced attachments:\n" + "\n".join(
-        f"- {reference}" for reference in references
+        f"- {reference}" for reference in orphaned_references
     )
     return f"{text}\n\n{attachment_block}" if text else attachment_block

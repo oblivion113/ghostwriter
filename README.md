@@ -16,8 +16,10 @@ The project has its own uv-managed `.venv`; it does not use the base Python envi
 
 - Mouse editing and drag selection in a multiline prompt editor
 - Normal copy, cut, paste, undo, and redo
-- File and image attachments by typed or dragged path
+- Inline file and image markers inserted at the current cursor
 - Ghostty-compatible image preview with Unicode fallback
+- Translation, tidying, and iterative revision through an isolated Pi RPC session
+- Strict local placeholder restoration that keeps attachment details away from the rewrite model
 - Persistent draft and content-addressed image cache
 - Discovery of multiple running Pi instances
 - Whole-editor replacement with revision and target validation
@@ -66,6 +68,7 @@ A later injection replaces the entire unsent Pi draft again.
 | `Ctrl+O` | Focus attachment path |
 | `Ctrl+R` | Refresh targets |
 | `Ctrl+S` | Save draft |
+| `F4` | Translate / tidy the draft with Pi RPC |
 | `Ctrl+Q` | Quit |
 
 Text editing, selection, clipboard, and history keys come from Textual's `TextArea`.
@@ -81,6 +84,16 @@ File references are serialized using Pi's conventions:
 
 Images are validated, copied once to a content-addressed cache, previewed in Ghostwriter, and injected as persistent absolute paths. The draft is stored under the platform state directory; images are under the platform cache directory.
 
+New attachments are represented by readable local markers at the editor cursor. Injection adapters replace those markers in place, preserving their position in the prompt.
+
+## Translation and tidying
+
+Press `F4` to translate, tidy, or do both before injection. Ghostwriter starts a tool-free Pi RPC process using the chosen provider/model, protects inline attachments with opaque placeholders, and returns the result to a review dialog. You may accept, reject, directly edit, or provide revision feedback while the same RPC conversation remains alive.
+
+The accepted result returns to Ghostwriter—not Pi's visible editor. Attachment mappings, paths, and content remain local. Every placeholder is validated before restoration. The temporary cached RPC session is deleted by default when the review workflow ends.
+
+See [`docs/rewrite.md`](docs/rewrite.md) for protocol and privacy details.
+
 ## Architecture
 
 ```text
@@ -89,6 +102,8 @@ Textual UI
       ├── PiAdapter ── Unix socket ── Pi TypeScript extension
       ├── CodexAdapter (future)
       └── ClaudeCodeAdapter (future)
+
+RewriteSession ── protected placeholders ── isolated Pi RPC process
 ```
 
 Adapters own target discovery, attachment serialization, and injection. See [`docs/adapters.md`](docs/adapters.md) before adding another CLI target.

@@ -23,6 +23,11 @@ class Attachment:
     def injected(self) -> Path:
         return Path(self.injected_path)
 
+    @property
+    def editor_token(self) -> str:
+        safe_name = self.source.name.replace("[", "(").replace("]", ")")
+        return f"[[GW:{self.kind}:{self.id[:12]}:{safe_name}]]"
+
     def to_dict(self) -> dict[str, str]:
         return asdict(self)
 

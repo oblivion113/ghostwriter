@@ -25,6 +25,8 @@ from textual_image.widget import Image
 
 from .adapters import AdapterRegistry, InjectionRequest, InjectionTarget
 from .model import Attachment, AttachmentKind
+from .rewrite import PiRpcError, PlaceholderIntegrityError, RewriteOptions, RewriteSession
+from .rewrite.screens import RewriteConfigScreen, RewriteReviewScreen
 from .storage import DraftStore, ImageCache
 
 
@@ -38,6 +40,7 @@ class GhostwriterApp(App[None]):
         Binding("ctrl+o", "focus_path", "Attach path"),
         Binding("ctrl+r", "refresh_targets", "Refresh Pi targets"),
         Binding("ctrl+s", "save", "Save draft"),
+        Binding("f4", "rewrite", "Translate / tidy"),
         Binding("ctrl+q", "quit", "Quit"),
     ]
 
@@ -50,6 +53,7 @@ class GhostwriterApp(App[None]):
         self.targets: dict[str, InjectionTarget] = {}
         self.selected_attachment_id: str | None = None
         self.initial_paths = initial_paths or []
+        self.rewrite_defaults = RewriteOptions()
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)
@@ -72,6 +76,7 @@ class GhostwriterApp(App[None]):
                     yield Button("Add image", id="add-image")
                 with Horizontal(id="actions"):
                     yield Button("Inject into Pi", id="inject", variant="success")
+                    yield Button("Translate / tidy", id="rewrite", variant="primary")
                     yield Button("Save draft", id="save")
             with Vertical(id="side-pane"):
                 yield Label("PI TARGET", classes="section-title")
@@ -155,9 +160,11 @@ class GhostwriterApp(App[None]):
             raise ValueError(f"Already attached: {source}")
 
         injected = self.image_cache.stage(source) if kind == "image" else source
-        self.draft.attachments.append(
-            Attachment(kind=kind, source_path=str(source), injected_path=str(injected))
-        )
+        attachment = Attachment(kind=kind, source_path=str(source), injected_path=str(injected))
+        self.draft.attachments.append(attachment)
+        editor = self.query_one("#prompt-editor", TextArea)
+        prefix = "" if editor.cursor_at_start_of_text else " "
+        editor.insert(f"{prefix}{attachment.editor_token} ")
         self._refresh_attachment_table()
         self.store.save(self.draft)
         self._set_status(f"Added {kind}: {source.name}")
@@ -231,6 +238,71 @@ class GhostwriterApp(App[None]):
     def action_inject(self) -> None:
         self.run_worker(self._inject(), exclusive=True, group="inject")
 
+    def action_rewrite(self) -> None:
+        self.run_worker(self._rewrite(), exclusive=True, group="rewrite")
+
+    async def _rewrite(self) -> None:
+        self._capture_text()
+        if not self.draft.text.strip():
+            self.notify("The draft is empty", severity="warning")
+            return
+
+        target = self._selected_target()
+        defaults = self.rewrite_defaults
+        if target is not None and not defaults.model:
+            defaults = RewriteOptions(
+                translate=defaults.translate,
+                tidy=defaults.tidy,
+                source_language=defaults.source_language,
+                target_language=defaults.target_language,
+                provider=str(target.metadata.get("modelProvider", "")),
+                model=str(target.metadata.get("modelId", "")),
+            )
+        options = await self.push_screen_wait(RewriteConfigScreen(defaults))
+        if options is None:
+            return
+        self.rewrite_defaults = options
+
+        button = self.query_one("#rewrite", Button)
+        button.disabled = True
+        session = RewriteSession(self.draft, options)
+        try:
+            model_label = options.model or "Pi default model"
+            self._set_status(f"Transforming with {model_label}…")
+            candidate = await session.transform(self.draft.text)
+            while True:
+                decision = await self.push_screen_wait(RewriteReviewScreen(candidate))
+                if decision.action == "reject":
+                    self._set_status("Model result rejected; original draft preserved")
+                    return
+                if decision.action == "accept":
+                    try:
+                        session.protector.protect(decision.text)
+                    except PlaceholderIntegrityError as error:
+                        self.notify(str(error), severity="error")
+                        candidate = decision.text
+                        continue
+                    editor = self.query_one("#prompt-editor", TextArea)
+                    editor.load_text(decision.text)
+                    self.draft.text = decision.text
+                    self.store.save(self.draft)
+                    self._set_status("Translated / tidied result accepted")
+                    self.notify("The transformed draft is back in Ghostwriter. It was not sent to Pi's editor.")
+                    return
+
+                self._set_status("Applying revision feedback in the same RPC session…")
+                try:
+                    candidate = await session.revise(decision.text, decision.feedback)
+                except PlaceholderIntegrityError as error:
+                    self.notify(str(error), severity="error")
+                    candidate = decision.text
+        except (OSError, PiRpcError, PlaceholderIntegrityError, TimeoutError, ValueError) as error:
+            self._set_status("Translation / tidy failed")
+            self.notify(str(error), severity="error")
+        finally:
+            await session.close()
+            button.disabled = False
+
     def action_focus_path(self) -> None:
         self.query_one("#attachment-path", Input).focus()
 
@@ -291,6 +363,8 @@ class GhostwriterApp(App[None]):
                 self._add_paths_from_input("image")
             case "inject":
                 self.action_inject()
+            case "rewrite":
+                self.action_rewrite()
             case "save":
                 self.action_save()
             case "refresh-targets":
@@ -302,12 +376,18 @@ class GhostwriterApp(App[None]):
         if self.selected_attachment_id is None:
             self.notify("Select an attachment first", severity="warning")
             return
-        before = len(self.draft.attachments)
+        removed = next(
+            (item for item in self.draft.attachments if item.id == self.selected_attachment_id),
+            None,
+        )
+        if removed is None:
+            return
         self.draft.attachments = [
             item for item in self.draft.attachments if item.id != self.selected_attachment_id
         ]
-        if len(self.draft.attachments) == before:
-            return
+        if removed is not None:
+            editor = self.query_one("#prompt-editor", TextArea)
+            editor.load_text(editor.text.replace(removed.editor_token, ""))
         self.selected_attachment_id = None
         self._refresh_attachment_table()
         self.query_one("#image-preview", Image).display = False

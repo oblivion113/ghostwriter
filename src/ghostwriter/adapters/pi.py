@@ -64,6 +64,9 @@ class PiAdapter:
                         "pid": pid,
                         "sessionId": str(data["sessionId"]),
                         "socketPath": str(socket_path),
+                        "modelProvider": str(data.get("modelProvider", "")),
+                        "modelId": str(data.get("modelId", "")),
+                        "thinkingLevel": str(data.get("thinkingLevel", "")),
                     },
                 )
                 targets.append((str(data.get("startedAt", "")), target))

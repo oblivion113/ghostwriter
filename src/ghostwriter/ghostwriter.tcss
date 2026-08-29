@@ -113,6 +113,70 @@ Button.-success {
     background: #3a7a5e;
 }
 
+RewriteConfigScreen,
+RewriteReviewScreen {
+    align: center middle;
+    background: #05070aaa;
+}
+
+#rewrite-config-dialog,
+#rewrite-review-dialog {
+    width: 88;
+    max-width: 92%;
+    background: #111621;
+    border: round #7aa2f7;
+    padding: 1 2;
+}
+
+#rewrite-config-dialog {
+    height: 32;
+}
+
+#rewrite-review-dialog {
+    height: 88%;
+}
+
+.dialog-title {
+    height: 1;
+    color: #e5c07b;
+    text-style: bold;
+    margin-bottom: 1;
+}
+
+.dialog-help {
+    height: auto;
+    color: #9aa5ce;
+    margin-bottom: 1;
+}
+
+.checkbox-row,
+.dialog-actions {
+    height: 3;
+    margin: 1 0;
+}
+
+.checkbox-row Checkbox {
+    margin-right: 3;
+}
+
+.dialog-actions Button {
+    margin-right: 1;
+}
+
+#rewrite-config-dialog Input {
+    margin-bottom: 1;
+}
+
+#rewrite-result {
+    height: 1fr;
+    border: round #46516a;
+    margin: 1 0;
+}
+
+#rewrite-feedback {
+    margin-top: 1;
+}
+
 Screen.narrow #workspace {
     layout: vertical;
 }

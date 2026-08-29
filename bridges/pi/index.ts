@@ -85,6 +85,9 @@ export default function ghostwriterBridge(pi: ExtensionAPI): void {
       sessionName: ctx.sessionManager.getSessionName(),
       cwd: ctx.cwd,
       socketPath,
+      modelProvider: ctx.model?.provider,
+      modelId: ctx.model?.id,
+      thinkingLevel: ctx.thinkingLevel,
       startedAt: new Date().toISOString(),
     };
     const temporary = `${registryPath}.tmp-${process.pid}`;
@@ -185,6 +188,14 @@ export default function ghostwriterBridge(pi: ExtensionAPI): void {
   });
 
   pi.on("session_info_changed", async (_event, ctx) => {
+    await writeRegistry(ctx);
+  });
+
+  pi.on("model_select", async (_event, ctx) => {
+    await writeRegistry(ctx);
+  });
+
+  pi.on("thinking_level_select", async (_event, ctx) => {
     await writeRegistry(ctx);
   });
 
