@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+target_path="${PI_AGENT_DIR:-$HOME/.pi/agent}/extensions/ghostwriter.ts"
+
+if [[ -L "$target_path" ]]; then
+  rm "$target_path"
+  printf 'Removed Pi bridge: %s\n' "$target_path"
+elif [[ -e "$target_path" ]]; then
+  printf 'Refusing to remove a non-symlink: %s\n' "$target_path" >&2
+  exit 1
+else
+  printf 'Pi bridge is not installed.\n'
+fi
