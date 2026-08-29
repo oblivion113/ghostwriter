@@ -25,6 +25,10 @@ class Attachment:
 
     @property
     def editor_token(self) -> str:
+        return f"@{self.source.name}"
+
+    @property
+    def legacy_editor_token(self) -> str:
         safe_name = self.source.name.replace("[", "(").replace("]", ")")
         return f"[[GW:{self.kind}:{self.id[:12]}:{safe_name}]]"
 
@@ -53,7 +57,7 @@ class Draft:
 
     def to_dict(self) -> dict[str, object]:
         return {
-            "version": 1,
+            "version": 2,
             "id": self.id,
             "revision": self.revision,
             "text": self.text,
@@ -68,8 +72,12 @@ class Draft:
             for item in raw_attachments
             if isinstance(item, dict)
         ]
+        text = str(data.get("text", ""))
+        if int(data.get("version", 1)) < 2:
+            for attachment in attachments:
+                text = text.replace(attachment.legacy_editor_token, attachment.editor_token)
         return cls(
-            text=str(data.get("text", "")),
+            text=text,
             attachments=attachments,
             id=str(data.get("id") or uuid4().hex),
             revision=int(data.get("revision", 0)),

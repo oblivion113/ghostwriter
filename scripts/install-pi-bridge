@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-source_path="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/bridges/pi/index.ts"
+source_path="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/pi-extension.ts"
 extension_dir="${PI_AGENT_DIR:-$HOME/.pi/agent}/extensions"
 target_path="$extension_dir/ghostwriter.ts"
 

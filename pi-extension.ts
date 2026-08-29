@@ -55,6 +55,8 @@ export default function ghostwriterBridge(pi: ExtensionAPI): void {
   let socketPath: string | undefined;
   let registryPath: string | undefined;
   let activeContext: ExtensionContext | undefined;
+  let startedAt: string | undefined;
+  let registryWrites = Promise.resolve();
   const applied = new Map<string, AppliedRevision>();
 
   async function removeRuntimeFiles(): Promise<void> {
@@ -71,28 +73,39 @@ export default function ghostwriterBridge(pi: ExtensionAPI): void {
     if (current) {
       await new Promise<void>((resolve) => current.close(() => resolve()));
     }
+    await registryWrites.catch(() => undefined);
     await removeRuntimeFiles();
     socketPath = undefined;
     registryPath = undefined;
+    startedAt = undefined;
   }
 
-  async function writeRegistry(ctx: ExtensionContext): Promise<void> {
-    if (!socketPath || !registryPath) return;
+  function writeRegistry(ctx: ExtensionContext): Promise<void> {
+    const targetSocketPath = socketPath;
+    const targetRegistryPath = registryPath;
+    if (!targetSocketPath || !targetRegistryPath) return Promise.resolve();
+
     const registry = {
       version: PROTOCOL_VERSION,
       pid: process.pid,
       sessionId: ctx.sessionManager.getSessionId(),
       sessionName: ctx.sessionManager.getSessionName(),
       cwd: ctx.cwd,
-      socketPath,
+      socketPath: targetSocketPath,
       modelProvider: ctx.model?.provider,
       modelId: ctx.model?.id,
       thinkingLevel: ctx.thinkingLevel,
-      startedAt: new Date().toISOString(),
+      startedAt,
+      updatedAt: new Date().toISOString(),
     };
-    const temporary = `${registryPath}.tmp-${process.pid}`;
-    await writeFile(temporary, `${JSON.stringify(registry, null, 2)}\n`, { mode: 0o600 });
-    await rename(temporary, registryPath);
+
+    registryWrites = registryWrites.catch(() => undefined).then(async () => {
+      if (targetSocketPath !== socketPath || targetRegistryPath !== registryPath) return;
+      const temporary = `${targetRegistryPath}.tmp-${process.pid}`;
+      await writeFile(temporary, `${JSON.stringify(registry, null, 2)}\n`, { mode: 0o600 });
+      await rename(temporary, targetRegistryPath);
+    });
+    return registryWrites;
   }
 
   function handleConnection(socket: Socket): void {
@@ -140,6 +153,9 @@ export default function ghostwriterBridge(pi: ExtensionAPI): void {
         }
 
         ctx.ui.setEditorText(request.text);
+        // setEditorText updates editor state but Pi does not currently schedule a
+        // render when it is called from an external socket callback.
+        ctx.ui.setStatus("ghostwriter-render", undefined);
         applied.set(request.draftId, { revision: request.revision, sha256 });
         reply(socket, {
           ok: true,
@@ -158,10 +174,29 @@ export default function ghostwriterBridge(pi: ExtensionAPI): void {
     socket.on("error", () => undefined);
   }
 
+  pi.registerCommand("ghostwriter-status", {
+    description: "Show the Pi session details used by Ghostwriter",
+    handler: async (_args, ctx) => {
+      const session = ctx.sessionManager.getSessionName() ?? ctx.sessionManager.getSessionId();
+      const model = ctx.model ? `${ctx.model.provider}/${ctx.model.id}` : "No model selected";
+      ctx.ui.notify(
+        [
+          `Session: ${session}`,
+          `Directory: ${ctx.cwd}`,
+          `Model: ${model}`,
+          `Thinking: ${ctx.thinkingLevel}`,
+          `PID: ${process.pid}`,
+        ].join("\n"),
+        "info",
+      );
+    },
+  });
+
   pi.on("session_start", async (_event, ctx) => {
     if (ctx.mode !== "tui") return;
     await stop();
     activeContext = ctx;
+    startedAt = new Date().toISOString();
     await mkdir(RUNTIME_DIR, { recursive: true, mode: 0o700 });
     await mkdir(SOCKET_DIR, { recursive: true, mode: 0o700 });
     await chmod(RUNTIME_DIR, 0o700);

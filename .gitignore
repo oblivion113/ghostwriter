@@ -11,5 +11,8 @@ wheels/
 # Virtual environments
 .venv/
 
+# Local task notes
+prompt.txt
+
 # macOS
 .DS_Store

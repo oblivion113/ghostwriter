@@ -6,7 +6,7 @@ from typing import ClassVar, Literal
 from textual import on
 from textual.app import ComposeResult
 from textual.binding import Binding
-from textual.containers import Horizontal, Vertical
+from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.screen import ModalScreen
 from textual.widgets import Button, Checkbox, Input, Label, Static, TextArea
 
@@ -14,22 +14,36 @@ from .service import RewriteOptions
 
 
 class RewriteConfigScreen(ModalScreen[RewriteOptions | None]):
-    BINDINGS: ClassVar[list[Binding]] = [Binding("escape", "cancel", "Cancel")]
+    BINDINGS: ClassVar[list[Binding]] = [
+        Binding("ctrl+enter", "start", "Run rewrite", priority=True),
+        Binding("escape", "cancel", "Cancel"),
+    ]
 
     def __init__(self, defaults: RewriteOptions) -> None:
         super().__init__()
         self.defaults = defaults
 
     def compose(self) -> ComposeResult:
-        with Vertical(id="rewrite-config-dialog"):
+        with VerticalScroll(id="rewrite-config-dialog"):
             yield Label("TRANSLATE / TIDY", classes="dialog-title")
             yield Static(
-                "Attachments stay local. Only opaque placeholders are sent to the selected Pi model.",
+                "Choose Translate, Tidy, or both. Select Run or press Ctrl+Enter to start Pi RPC. "
+                "Attachments stay local.",
                 classes="dialog-help",
             )
             with Horizontal(classes="checkbox-row"):
-                yield Checkbox("Translate", self.defaults.translate, id="rewrite-translate")
-                yield Checkbox("Tidy and structure", self.defaults.tidy, id="rewrite-tidy")
+                yield Checkbox(
+                    "Translate",
+                    self.defaults.translate,
+                    id="rewrite-translate",
+                    compact=True,
+                )
+                yield Checkbox(
+                    "Tidy and structure",
+                    self.defaults.tidy,
+                    id="rewrite-tidy",
+                    compact=True,
+                )
             yield Label("Source language")
             yield Input(self.defaults.source_language, id="rewrite-source")
             yield Label("Target language")
@@ -43,14 +57,32 @@ class RewriteConfigScreen(ModalScreen[RewriteOptions | None]):
                 id="rewrite-model",
             )
             with Horizontal(classes="dialog-actions"):
-                yield Button("Start", id="rewrite-start", variant="success")
-                yield Button("Cancel", id="rewrite-cancel")
+                yield Button(
+                    "Run",
+                    id="rewrite-start",
+                    classes="tool-button primary-action",
+                    compact=True,
+                    flat=True,
+                )
+                yield Button(
+                    "Cancel",
+                    id="rewrite-cancel",
+                    classes="tool-button",
+                    compact=True,
+                    flat=True,
+                )
 
     def action_cancel(self) -> None:
         self.dismiss(None)
 
+    def action_start(self) -> None:
+        self._start()
+
     @on(Button.Pressed, "#rewrite-start")
-    def start(self) -> None:
+    def start_button(self) -> None:
+        self._start()
+
+    def _start(self) -> None:
         options = RewriteOptions(
             translate=self.query_one("#rewrite-translate", Checkbox).value,
             tidy=self.query_one("#rewrite-tidy", Checkbox).value,
@@ -101,9 +133,27 @@ class RewriteReviewScreen(ModalScreen[ReviewDecision]):
                 id="rewrite-feedback",
             )
             with Horizontal(classes="dialog-actions"):
-                yield Button("Accept", id="review-accept", variant="success")
-                yield Button("Revise", id="review-revise", variant="primary")
-                yield Button("Reject", id="review-reject", variant="error")
+                yield Button(
+                    "Accept",
+                    id="review-accept",
+                    classes="tool-button primary-action",
+                    compact=True,
+                    flat=True,
+                )
+                yield Button(
+                    "Revise",
+                    id="review-revise",
+                    classes="tool-button",
+                    compact=True,
+                    flat=True,
+                )
+                yield Button(
+                    "Reject",
+                    id="review-reject",
+                    classes="tool-button",
+                    compact=True,
+                    flat=True,
+                )
 
     def _current_text(self) -> str:
         return self.query_one("#rewrite-result", TextArea).text

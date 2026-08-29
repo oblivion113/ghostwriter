@@ -1,7 +1,7 @@
 [project]
 name = "ghostwriter"
 version = "0.2.0"
-description = "A mouse-friendly terminal prompt composer with extensible CLI injection adapters"
+description = "A mouse-friendly terminal prompt composer for Pi"
 authors = [
     { name = "oblivion113", email = "abdousalamadan1993@gmail.com" }
 ]
