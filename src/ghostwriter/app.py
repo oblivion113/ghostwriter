@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import re
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from pathlib import Path
 from typing import ClassVar
 
@@ -9,10 +9,12 @@ from rich.text import Text
 from textual import events, on
 from textual.app import App, ComposeResult, SystemCommand
 from textual.binding import Binding
+from textual.command import CommandPalette
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.events import Resize
 from textual.message import Message
 from textual.screen import Screen
+from textual.theme import ThemeProvider
 from textual.widgets import (
     Button,
     DataTable,
@@ -126,6 +128,17 @@ class PromptTextArea(TextArea):
             event.prevent_default()
 
 
+class CurrentThemeProvider(ThemeProvider):
+    """List the active theme first so the palette opens on the current choice."""
+
+    @property
+    def commands(self) -> list[tuple[str, Callable[[], None]]]:
+        return sorted(
+            super().commands,
+            key=lambda command: (command[0] != self.app.theme, command[0]),
+        )
+
+
 class GhostwriterApp(App[None]):
     TITLE = "Ghostwriter"
     SUB_TITLE = "Compose here. Submit in Pi."
@@ -193,6 +206,14 @@ class GhostwriterApp(App[None]):
             command
             for command in super().get_system_commands(screen)
             if command.title != "Screenshot"
+        )
+
+    def search_themes(self) -> None:
+        self.push_screen(
+            CommandPalette(
+                providers=[CurrentThemeProvider],
+                placeholder="Search for themes…",
+            )
         )
 
     def compose(self) -> ComposeResult:

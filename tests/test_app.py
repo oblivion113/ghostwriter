@@ -8,7 +8,7 @@ from textual.containers import VerticalScroll
 from textual.widgets import Select
 from textual.widgets._select import InvalidSelectValueError
 
-from ghostwriter.app import GhostwriterApp
+from ghostwriter.app import CurrentThemeProvider, GhostwriterApp
 from ghostwriter.model import Draft
 from ghostwriter.pi import PiTarget
 from ghostwriter.storage import DraftStore
@@ -244,6 +244,18 @@ def test_command_palette_omits_screenshot_and_only_offers_comfortable_themes() -
 
 
 @pytest.mark.asyncio
+async def test_theme_palette_opens_on_current_theme(tmp_path: Path) -> None:
+    app = GhostwriterApp()
+    app.store = DraftStore(tmp_path / "draft.json")
+
+    async with app.run_test():
+        app.theme = "nord"
+        provider = CurrentThemeProvider(app.screen)
+
+        assert provider.commands[0][0] == "nord"
+
+
+@pytest.mark.asyncio
 async def test_prompt_soft_wraps_without_horizontal_scrolling(tmp_path: Path) -> None:
     app = GhostwriterApp()
     app.draft = Draft(text="word " * 100)
@@ -269,6 +281,23 @@ async def test_prompt_text_stays_white_across_themes(tmp_path: Path) -> None:
             app.theme = theme
             await pilot.pause()
             assert editor.styles.color.hex == "#FFFFFF"
+
+
+@pytest.mark.asyncio
+async def test_theme_colors_accent_controls_without_tinting_content_panels(tmp_path: Path) -> None:
+    app = GhostwriterApp()
+    app.store = DraftStore(tmp_path / "draft.json")
+
+    async with app.run_test(size=(120, 40)) as pilot:
+        for theme in app.COMFORTABLE_THEMES:
+            app.theme = theme
+            await pilot.pause()
+            primary = app.current_theme.primary
+
+            assert app.query_one(".section-title").styles.color.hex == primary.upper()
+            assert app.query_one(".tool-button").styles.background.hex == primary.upper()
+            assert app.query_one("#target SelectCurrent").styles.background.a == 0
+            assert app.query_one("#attachments").styles.background.a == 0
 
 
 @pytest.mark.asyncio

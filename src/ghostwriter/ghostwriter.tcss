@@ -52,7 +52,7 @@ Header {
 }
 
 .section-title {
-    color: #9199a6;
+    color: $primary;
     text-style: bold;
     height: 1;
 }
@@ -72,7 +72,7 @@ Header {
 }
 
 PromptTextArea .prompt-attachment {
-    color: #7aa2f7;
+    color: $primary;
     text-style: bold;
 }
 
@@ -95,16 +95,21 @@ PromptTextArea .prompt-attachment {
     line-pad: 1;
     margin-right: 1;
     border: none;
-    background: #20252d;
-    color: #bfc5cf;
+    background: $primary;
+    color: $button-color-foreground;
     text-style: none;
 }
 
 .tool-button:hover,
-.tool-button:focus,
+.tool-button:focus {
+    background: $primary-lighten-1;
+    color: $button-color-foreground;
+    text-style: bold;
+}
+
 .primary-action {
-    background: #343b46;
-    color: #f0f2f5;
+    background: $primary-darken-1;
+    color: $button-color-foreground;
     text-style: bold;
 }
 
@@ -128,6 +133,10 @@ PromptTextArea .prompt-attachment {
     background: #14181e;
 }
 
+#target SelectCurrent {
+    background: transparent;
+}
+
 #remove-attachment {
     margin-bottom: 1;
 }
@@ -135,6 +144,11 @@ PromptTextArea .prompt-attachment {
 #attachments {
     height: 9;
     border: round #2d333d;
+    background: transparent;
+}
+
+#attachments:focus {
+    background-tint: 0%;
 }
 
 #preview-path {
