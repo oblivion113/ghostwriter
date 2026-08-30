@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from ghostwriter.config import DEFAULT_REWRITE_PROMPT, validate_prompt_template
 from ghostwriter.model import Draft
 
 from .pi_rpc import PiRpcSession
@@ -16,20 +17,30 @@ class RewriteOptions:
     target_language: str = "English"
     provider: str = ""
     model: str = ""
+    agent: str = "Pi default"
+    prompt: str = DEFAULT_REWRITE_PROMPT
 
     def validate(self) -> None:
         if not self.translate and not self.tidy:
             raise ValueError("Enable translation, tidying, or both")
         if self.translate and not self.target_language.strip():
             raise ValueError("A target language is required for translation")
+        validate_prompt_template(self.prompt)
 
 
 class RewriteSession:
-    def __init__(self, draft: Draft, options: RewriteOptions) -> None:
+    def __init__(
+        self,
+        draft: Draft,
+        options: RewriteOptions,
+        *,
+        rpc: PiRpcSession | None = None,
+    ) -> None:
         options.validate()
         self.options = options
         self.protector = AttachmentProtector(draft.text, draft.attachments)
-        self.rpc = PiRpcSession(provider=options.provider, model=options.model)
+        self.rpc = rpc or PiRpcSession(provider=options.provider, model=options.model)
+        self._owns_rpc = rpc is None
 
     def _initial_prompt(self, text: str) -> str:
         options = self.options
@@ -44,21 +55,24 @@ class RewriteSession:
         if options.tidy:
             tasks.append(
                 "Correct transcription, spelling, grammar, punctuation, and obvious wording errors. "
-                "Organize the draft into clear paragraphs and add concise Markdown headings only when "
-                "they genuinely improve readability. Preserve meaning, detail, tone, and instructions."
+                "Use clear paragraphs, but never add a heading to a short or single-section draft. "
+                "For longer, genuinely multi-section material, preserve useful existing headings and add "
+                "new concise Markdown headings only when they materially improve navigation. Preserve "
+                "meaning, detail, tone, and instructions."
             )
         else:
-            tasks.append("Do not reorganize or stylistically rewrite beyond what fluent translation requires.")
+            tasks.append(
+                "Do not reorganize or stylistically rewrite beyond what fluent translation requires. "
+                "Preserve the existing structure and never add new headings."
+            )
 
         instructions = "\n".join(f"- {task}" for task in tasks)
-        return f"""Transform the draft under these requirements:
-{instructions}
-- Return the entire transformed draft and nothing else.
-- Preserve every __GW_*_ATTACHMENT_####__ token byte-for-byte, exactly once, near the same semantic context.
-
-DRAFT START
-{self.protector.protect(text)}
-DRAFT END"""
+        return options.prompt.format(
+            instructions=instructions,
+            source_language=options.source_language.strip() or "auto-detect",
+            target_language=options.target_language.strip(),
+            text=self.protector.protect(text),
+        )
 
     @staticmethod
     def _revision_prompt(protected_text: str, feedback: str) -> str:
@@ -100,4 +114,5 @@ CURRENT CANDIDATE END"""
         return await self._restore_with_repair(result)
 
     async def close(self) -> None:
-        await self.rpc.close()
+        if self._owns_rpc:
+            await self.rpc.close()

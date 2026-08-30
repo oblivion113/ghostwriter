@@ -48,4 +48,26 @@ async def test_transform_and_revision_reuse_session_without_exposing_path() -> N
     assert "/private/secret screenshot.png" not in "\n".join(fake_rpc.prompts)
     assert "secret screenshot.png" not in "\n".join(fake_rpc.prompts)
     assert len(fake_rpc.prompts) == 2
+    assert "never add a heading to a short or single-section draft" in fake_rpc.prompts[0]
     assert fake_rpc.closed
+
+
+@pytest.mark.asyncio
+async def test_custom_prompt_receives_language_and_protected_text() -> None:
+    attachment = Attachment("file", "/private/notes.md", "/private/notes.md", id="abcdef1234567890")
+    draft = Draft(text=f"bonjour {attachment.editor_token}", attachments=[attachment])
+    session = RewriteSession(
+        draft,
+        RewriteOptions(
+            target_language="English",
+            prompt="Translate into {target_language}:\n{text}",
+        ),
+    )
+    fake_rpc = FakeRpc()
+    session.rpc = fake_rpc  # type: ignore[assignment]
+
+    await session.transform(draft.text)
+    await session.close()
+
+    assert fake_rpc.prompts[0].startswith("Translate into English:")
+    assert attachment.editor_token not in fake_rpc.prompts[0]

@@ -22,6 +22,7 @@ The Python application owns composition and local state. The TypeScript extensio
 | --- | --- |
 | `src/ghostwriter/app.py` | Textual widgets, responsive layout, actions, workers, and screen orchestration |
 | `src/ghostwriter/model.py` | Versioned `Draft` and `Attachment` serialization |
+| `src/ghostwriter/config.py` | Unified JSON rewrite settings, defaults, and prompt validation |
 | `src/ghostwriter/files.py` | Dragged-path parsing, native picker, recursive `@` index, and safe previews |
 | `src/ghostwriter/storage.py` | Atomic draft persistence and content-addressed image cache |
 | `src/ghostwriter/pi.py` | Pi registry discovery, Pi attachment syntax, and socket exchange |
@@ -65,18 +66,14 @@ The selected Pi session's working directory is the project root. `files.py` inde
 
 Rewrite is separate from visible Pi injection:
 
-1. `RewriteConfigScreen` returns validated `RewriteOptions`.
-2. `AttachmentProtector` replaces every local marker occurrence with a random opaque token.
-3. `PiRpcSession` launches:
-
-   ```text
-   pi --mode rpc --no-tools --no-extensions --no-skills --no-prompt-templates
-   ```
-
-4. The child runs in a private cache directory with a transformation-only system prompt and thinking disabled.
-5. Responses are checked so every expected placeholder occurs exactly once. One repair request is allowed if integrity fails.
-6. The review screen supports acceptance, rejection, direct edits, and revision feedback in the same RPC conversation.
-7. Closing the workflow terminates the process and removes its temporary session directory by default.
+1. `ConfigStore` supplies named agents, target languages, warm-up policy, and the prompt template.
+2. App startup normally launches `PiRpcSession` once with tools and project resources disabled.
+3. `RewriteConfigScreen` returns validated `RewriteOptions` from configured dropdowns.
+4. `PiRpcSession.prepare()` starts a fresh Pi session for every workflow after the first and selects its configured model.
+5. `AttachmentProtector` replaces every local marker occurrence with a random opaque token.
+6. Responses are checked so every expected placeholder occurs exactly once. One repair request is allowed if integrity fails.
+7. The review screen supports acceptance, rejection, direct edits, and revision feedback in the same RPC conversation.
+8. App shutdown terminates the shared child and removes its private session directory. With warm mode disabled, cleanup instead happens after each workflow.
 
 No attachment path, filename, or content is sent to the rewrite model.
 
@@ -86,6 +83,7 @@ Textual owns terminal rendering and input. Important custom behavior includes:
 
 - `PromptTextArea`: intercepts bracketed paste and Tab completion;
 - `DragHandle`: captures mouse events directly for independent width and height resizing;
+- `OptionList`: presents complete, concise Pi target identity in one scrollable box;
 - `VerticalScroll`: keeps the side pane reachable in constrained layouts;
 - thread worker: runs blocking native file pickers without freezing Textual;
 - async workers: perform socket injection and Pi RPC communication.
@@ -96,6 +94,7 @@ The app switches between side-by-side and stacked layouts using terminal width a
 
 Paths use `platformdirs`, so exact locations vary by operating system:
 
+- config: `user_config_path("ghostwriter")/config.json`
 - state: `user_state_path("ghostwriter")/draft.json`
 - cache: `user_cache_path("ghostwriter")/images/`
 - rewrite sessions: `user_cache_path("ghostwriter")/rewrite-sessions/`

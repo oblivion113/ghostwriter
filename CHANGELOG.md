@@ -2,6 +2,14 @@
 
 All notable changes to Ghostwriter will be documented here. The project follows semantic versioning once releases are tagged.
 
+## Unreleased
+
+- Reserved visible space for prompt actions in compact and stacked layouts.
+- Consolidated Pi target identity into one concise scrollable list.
+- Added unified JSON configuration for rewrite agents, languages, RPC warm-up, and custom prompts, with default-editor and live-reload controls.
+- Kept one isolated rewrite RPC process warm across workflows while resetting conversation state and cleaning it up on exit.
+- Prevented the default rewrite prompt from adding headings to short, single-section drafts.
+
 ## 0.2.0 - 2026-08-29
 
 - Added protected translation and tidying through isolated Pi RPC sessions.

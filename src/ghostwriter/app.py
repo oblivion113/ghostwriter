@@ -17,13 +17,13 @@ from textual.widgets import (
     Header,
     Label,
     OptionList,
-    Select,
     Static,
     TextArea,
 )
 from textual.widgets.option_list import Option
 from textual_image.widget import Image
 
+from .config import ConfigStore, RewriteConfig, open_config_file
 from .files import (
     FileCompletion,
     build_file_index,
@@ -35,7 +35,13 @@ from .files import (
 )
 from .model import Attachment
 from .pi import PiBridgeClient, PiTarget
-from .rewrite import PiRpcError, PlaceholderIntegrityError, RewriteOptions, RewriteSession
+from .rewrite import (
+    PiRpcError,
+    PiRpcSession,
+    PlaceholderIntegrityError,
+    RewriteOptions,
+    RewriteSession,
+)
 from .rewrite.screens import RewriteConfigScreen, RewriteReviewScreen
 from .storage import DraftStore, ImageCache
 
@@ -121,20 +127,32 @@ class GhostwriterApp(App[None]):
     def __init__(self, initial_paths: list[Path] | None = None) -> None:
         super().__init__()
         self.store = DraftStore()
+        self.config_store = ConfigStore()
         self.image_cache = ImageCache()
         self.draft = self.store.load()
+        self.config = self.config_store.load()
         self.pi = PiBridgeClient()
         self.targets: dict[str, PiTarget] = {}
+        self.selected_target_id: str | None = None
         self.selected_attachment_id: str | None = None
         self.initial_paths = initial_paths or []
-        self.rewrite_defaults = RewriteOptions()
+        rewrite_config = self.config.rewrite
+        default_agent = rewrite_config.agent(rewrite_config.default_agent)
+        self.rewrite_defaults = RewriteOptions(
+            target_language=rewrite_config.default_target_language,
+            provider=default_agent.provider,
+            model=default_agent.model,
+            agent=default_agent.name,
+            prompt=rewrite_config.prompt,
+        )
+        self.rewrite_rpc = PiRpcSession()
         self._completion_candidates: list[FileCompletion] = []
         self._file_index_root: Path | None = None
         self._file_index: list[Path] = []
         self._stacked = False
         self._horizontal_split = 0.74
-        self._vertical_split = 0.62
-        self._prompt_split = 0.9
+        self._vertical_split = 0.52
+        self._prompt_split = 0.8
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)
@@ -188,7 +206,12 @@ class GhostwriterApp(App[None]):
             with VerticalScroll(id="side-pane"):
                 yield Label("PI TARGET", classes="section-title")
                 with Horizontal(id="target-row"):
-                    yield Select([], prompt="No Pi bridge found", id="target", allow_blank=True)
+                    yield OptionList(
+                        Option("No Pi bridge found", id="no-target"),
+                        id="target",
+                        markup=False,
+                        compact=True,
+                    )
                     yield Button(
                         "↻",
                         id="refresh-targets",
@@ -197,7 +220,6 @@ class GhostwriterApp(App[None]):
                         flat=True,
                         tooltip="Refresh Pi targets (Ctrl+R)",
                     )
-                yield Static("No Pi session selected", id="target-details", markup=False)
                 yield Label("ATTACHMENTS", classes="section-title")
                 yield DataTable(id="attachments", cursor_type="row")
                 yield Button(
@@ -228,6 +250,7 @@ class GhostwriterApp(App[None]):
             self._stacked = stacked
             self.screen.set_class(stacked, "stacked")
         self._apply_split()
+        self.call_after_refresh(self._apply_split)
 
     def on_mount(self) -> None:
         table = self.query_one("#attachments", DataTable)
@@ -236,11 +259,19 @@ class GhostwriterApp(App[None]):
         self.query_one("#image-preview", Image).display = False
         self.query_one("#text-preview", TextArea).display = False
         self.query_one("#preview-path", Static).display = False
+        self.call_after_refresh(self._apply_split)
+        if self.config_store.recovered_path is not None:
+            self.notify(
+                f"Invalid config was moved to {self.config_store.recovered_path}",
+                severity="warning",
+            )
         if self._reconcile_attachments(self.draft.text):
             self.store.save(self.draft)
         else:
             self._refresh_attachment_table()
         self.action_refresh_targets()
+        if self.config.rewrite.keep_rpc_warm and not self.is_headless:
+            self.run_worker(self._warm_rewrite_rpc(), exclusive=True, group="rewrite-warmup")
         for path in self.initial_paths:
             try:
                 self._add_attachment(path)
@@ -248,8 +279,45 @@ class GhostwriterApp(App[None]):
                 self.notify(str(error), severity="error")
         self.query_one("#prompt-editor", TextArea).focus()
 
-    def on_unmount(self) -> None:
+    async def on_unmount(self) -> None:
         self.store.save(self.draft)
+        await self.rewrite_rpc.close()
+
+    async def _warm_rewrite_rpc(self) -> None:
+        try:
+            await self.rewrite_rpc.start()
+        except (OSError, PiRpcError, TimeoutError) as error:
+            self.notify(f"Rewrite RPC warm-up failed: {error}", severity="warning")
+
+    def _open_config(self) -> None:
+        open_config_file(self.config_store.path)
+
+    def _reload_config(self) -> RewriteConfig:
+        previous = self.config.rewrite
+        config = self.config_store.reload()
+        self.config = config
+        rewrite = config.rewrite
+        current = self.rewrite_defaults
+        agent_names = {agent.name for agent in rewrite.agents}
+        agent = rewrite.agent(current.agent if current.agent in agent_names else rewrite.default_agent)
+        target_language = (
+            current.target_language
+            if current.target_language in rewrite.target_languages
+            else rewrite.default_target_language
+        )
+        self.rewrite_defaults = RewriteOptions(
+            translate=current.translate,
+            tidy=current.tidy,
+            source_language=current.source_language,
+            target_language=target_language,
+            provider=agent.provider,
+            model=agent.model,
+            agent=agent.name,
+            prompt=rewrite.prompt,
+        )
+        if rewrite.keep_rpc_warm and not previous.keep_rpc_warm and not self.is_headless:
+            self.run_worker(self._warm_rewrite_rpc(), exclusive=True, group="rewrite-warmup")
+        return rewrite
 
     def _capture_text(self) -> None:
         self.draft.text = self.query_one("#prompt-editor", TextArea).text
@@ -418,7 +486,11 @@ class GhostwriterApp(App[None]):
         editor = self.query_one("#editor-pane", Vertical)
         prompt = self.query_one("#prompt-region", Vertical)
         side = self.query_one("#side-pane", VerticalScroll)
-        prompt.styles.height = f"{self._prompt_split * 100:.1f}%"
+        if editor.size.height:
+            desired_prompt_height = round(editor.size.height * self._prompt_split)
+            prompt.styles.height = min(desired_prompt_height, max(8, editor.size.height - 4))
+        else:
+            prompt.styles.height = f"{self._prompt_split * 100:.1f}%"
         if self._stacked:
             editor.styles.width = "1fr"
             editor.styles.height = f"{self._vertical_split * 100:.1f}%"
@@ -431,10 +503,9 @@ class GhostwriterApp(App[None]):
             side.styles.height = "1fr"
 
     def _selected_target(self) -> PiTarget | None:
-        value = self.query_one("#target", Select).value
-        if value is Select.NULL:
+        if self.selected_target_id is None:
             return None
-        return self.targets.get(str(value))
+        return self.targets.get(self.selected_target_id)
 
     async def _inject(self) -> None:
         target = self._selected_target()
@@ -487,28 +558,30 @@ class GhostwriterApp(App[None]):
             self.notify("The draft is empty", severity="warning")
             return
 
-        target = self._selected_target()
-        defaults = self.rewrite_defaults
-        if target is not None and not defaults.model:
-            defaults = RewriteOptions(
-                translate=defaults.translate,
-                tidy=defaults.tidy,
-                source_language=defaults.source_language,
-                target_language=defaults.target_language,
-                provider=target.provider,
-                model=target.model_id,
+        try:
+            self._reload_config()
+        except (OSError, TypeError, ValueError) as error:
+            self.notify(f"Could not reload config: {error}", severity="warning")
+        options = await self.push_screen_wait(
+            RewriteConfigScreen(
+                self.rewrite_defaults,
+                self.config.rewrite,
+                self.config_store.path,
+                open_config=self._open_config,
+                reload_config=self._reload_config,
             )
-        options = await self.push_screen_wait(RewriteConfigScreen(defaults))
+        )
         if options is None:
             return
         self.rewrite_defaults = options
 
         button = self.query_one("#rewrite", Button)
         button.disabled = True
-        session = RewriteSession(self.draft, options)
+        session = RewriteSession(self.draft, options, rpc=self.rewrite_rpc)
         try:
-            model_label = options.model or "Pi default model"
-            self._set_status(f"Transforming with {model_label}…")
+            self._set_status(f"Preparing {options.agent}…")
+            await self.rewrite_rpc.prepare(provider=options.provider, model=options.model)
+            self._set_status(f"Transforming with {options.agent}…")
             candidate = await session.transform(self.draft.text)
             while True:
                 decision = await self.push_screen_wait(RewriteReviewScreen(candidate))
@@ -541,6 +614,8 @@ class GhostwriterApp(App[None]):
             self.notify(str(error), severity="error")
         finally:
             await session.close()
+            if not self.config.rewrite.keep_rpc_warm:
+                await self.rewrite_rpc.close()
             button.disabled = False
 
     def action_choose_file(self) -> None:
@@ -548,18 +623,26 @@ class GhostwriterApp(App[None]):
 
     def action_refresh_targets(self) -> None:
         self._file_index_root = None
-        select = self.query_one("#target", Select)
-        previous = None if select.value is Select.NULL else str(select.value)
+        target_list = self.query_one("#target", OptionList)
+        previous = self.selected_target_id
         found = self.pi.discover_targets()
         self.targets = {target.selection_id: target for target in found}
-        select.set_options((target.label, key) for key, target in self.targets.items())
-        if previous in self.targets:
-            select.value = previous
-        elif self.targets:
-            select.value = next(iter(self.targets))
-        select.disabled = not bool(self.targets)
-        select.prompt = "Choose a Pi instance" if self.targets else "No Pi bridge found"
-        self._update_target_details(self._selected_target())
+        target_list.clear_options()
+        if self.targets:
+            target_list.add_options(
+                Option(target.summary, id=selection_id)
+                for selection_id, target in self.targets.items()
+            )
+            self.selected_target_id = (
+                previous if previous in self.targets else next(iter(self.targets))
+            )
+            target_list.highlighted = list(self.targets).index(self.selected_target_id)
+            target_list.disabled = False
+        else:
+            target_list.add_option(Option("No Pi bridge found", id="no-target"))
+            target_list.highlighted = 0
+            target_list.disabled = True
+            self.selected_target_id = None
         count = len(self.targets)
         self._set_status(f"Found {count} Pi target{'s' if count != 1 else ''}")
 
@@ -597,11 +680,11 @@ class GhostwriterApp(App[None]):
     def file_completion_selected(self, event: OptionList.OptionSelected) -> None:
         self._accept_file_completion(event.option_index)
 
-    @on(Select.Changed, "#target")
-    def target_changed(self, event: Select.Changed) -> None:
-        target = None if event.value is Select.NULL else self.targets.get(str(event.value))
+    @on(OptionList.OptionHighlighted, "#target")
+    def target_highlighted(self, event: OptionList.OptionHighlighted) -> None:
+        option_id = event.option.id
+        self.selected_target_id = str(option_id) if option_id in self.targets else None
         self._file_index_root = None
-        self._update_target_details(target)
 
     @on(DataTable.RowHighlighted, "#attachments")
     def attachment_highlighted(self, event: DataTable.RowHighlighted) -> None:
@@ -628,10 +711,6 @@ class GhostwriterApp(App[None]):
                 self.action_refresh_targets()
             case "remove-attachment":
                 self._remove_selected_attachment()
-
-    def _update_target_details(self, target: PiTarget | None) -> None:
-        details = self.query_one("#target-details", Static)
-        details.update(target.details if target else "No Pi session selected")
 
     def _show_attachment_preview(self, attachment: Attachment | None) -> None:
         image = self.query_one("#image-preview", Image)

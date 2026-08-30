@@ -49,10 +49,19 @@ class PiRpcSession:
         self._events: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
         self._stderr_tail: deque[str] = deque(maxlen=40)
         self._sequence = 0
+        self._start_lock = asyncio.Lock()
+        self._conversation_started = False
+        self._startup_model: tuple[str, str] | None = None
 
     async def start(self) -> None:
-        if self.process is not None:
-            return
+        async with self._start_lock:
+            if self.process is not None and self.process.returncode is None:
+                return
+            if self.process is not None:
+                await self._close_process()
+            await self._start_process()
+
+    async def _start_process(self) -> None:
         executable = shutil.which("pi")
         if executable is None:
             raise PiRpcError("Pi executable was not found on PATH")
@@ -91,10 +100,28 @@ class PiRpcSession:
         self._reader_task = asyncio.create_task(self._read_stdout())
         self._stderr_task = asyncio.create_task(self._read_stderr())
         try:
-            await self.command("get_state")
+            response = await self.command("get_state")
+            data = response.get("data")
+            model = data.get("model") if isinstance(data, dict) else None
+            if isinstance(model, dict):
+                provider = model.get("provider")
+                model_id = model.get("id")
+                if isinstance(provider, str) and isinstance(model_id, str):
+                    self._startup_model = (provider, model_id)
         except Exception:
-            await self.close()
+            await self._close_process()
             raise
+
+    async def prepare(self, *, provider: str = "", model: str = "") -> None:
+        """Start the process and reset conversation state for a rewrite workflow."""
+        await self.start()
+        if self._conversation_started:
+            await self.command("new_session")
+        requested = (provider.strip(), model.strip())
+        selected = requested if all(requested) else self._startup_model
+        if selected is not None:
+            await self.command("set_model", provider=selected[0], modelId=selected[1])
+        self._conversation_started = True
 
     async def _read_stdout(self) -> None:
         assert self.process is not None and self.process.stdout is not None
@@ -173,6 +200,7 @@ class PiRpcSession:
 
     async def prompt(self, message: str) -> str:
         await self.start()
+        self._conversation_started = True
         await self.command("prompt", message=message)
         assistant_error: str | None = None
         async with asyncio.timeout(self.timeout):
@@ -200,6 +228,12 @@ class PiRpcSession:
         return text
 
     async def close(self) -> None:
+        async with self._start_lock:
+            await self._close_process()
+            if self.delete_session_on_close:
+                await asyncio.to_thread(shutil.rmtree, self.session_dir, True)
+
+    async def _close_process(self) -> None:
         process = self.process
         self.process = None
         try:
@@ -234,5 +268,8 @@ class PiRpcSession:
             self._reader_task = None
             self._stderr_task = None
             self._fail_pending(PiRpcError("Pi RPC session closed"))
-            if self.delete_session_on_close:
-                await asyncio.to_thread(shutil.rmtree, self.session_dir, True)
+            while not self._events.empty():
+                self._events.get_nowait()
+            self._stderr_tail.clear()
+            self._conversation_started = False
+            self._startup_model = None

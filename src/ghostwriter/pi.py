@@ -43,6 +43,17 @@ class PiTarget:
         return f"{identity} · {self.model_id or 'unknown model'} · {self.session_id[:6]}"
 
     @property
+    def summary(self) -> str:
+        project = self.cwd.name or str(self.cwd)
+        identity = self.session_name if self.session_name and self.session_name != project else project
+        try:
+            directory = "~/" + self.cwd.resolve().relative_to(Path.home().resolve()).as_posix()
+        except ValueError:
+            directory = str(self.cwd)
+        thinking = f":{self.thinking_level}" if self.thinking_level else ""
+        return f"{identity} · {self.model_name}{thinking} · {self.session_id[:6]} · {directory}"
+
+    @property
     def details(self) -> str:
         try:
             directory = "~/" + self.cwd.resolve().relative_to(Path.home().resolve()).as_posix()

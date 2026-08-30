@@ -20,27 +20,58 @@ Only the opaque token and prose are sent to the model. The attachment path, file
 
 Final Pi serialization happens later. The bridge client replaces local markers with Pi's file or image syntax.
 
-## RPC isolation
+## RPC isolation and lifetime
 
-Each transformation starts:
+By default, app startup launches one background process:
 
 ```text
 pi --mode rpc --no-tools --no-extensions --no-skills --no-prompt-templates
 ```
 
-It also supplies a transformation-only system prompt and runs from its own cache directory, avoiding project context and tool access. Authentication and model configuration still come from Pi.
+It receives a transformation-only system prompt and runs from a private cache directory, avoiding project context and tool access. Authentication and model configuration still come from Pi. Keeping this process alive removes repeated CLI and model-runtime startup cost.
 
-A unique session directory is created below the platform cache directory. The RPC process remains alive while the result is reviewed and revision feedback is exchanged. On acceptance, rejection, or failure, Ghostwriter closes the process and **deletes that cached session directory by default**. A hard process or machine crash may leave residue for later manual cleanup.
+Before the first rewrite, Ghostwriter selects the configured model. Before every later rewrite workflow, it sends Pi's `new_session` command and then `set_model`; this prevents one draft's conversation from leaking into another while retaining the warm process. Review revisions continue in the current conversation. The process is terminated and the entire private session directory is deleted when Ghostwriter exits. A hard process or machine crash may leave residue for later manual cleanup.
+
+Set `rewrite.keepRpcWarm` to `false` to launch lazily and close after each rewrite workflow.
+
+## Unified configuration
+
+On first start, Ghostwriter writes `config.json` under `user_config_path("ghostwriter")`. The `rewrite` object defines:
+
+- `keepRpcWarm`: whether app startup prewarms and retains the RPC process;
+- `agents`: named `{name, provider, model}` choices; blank provider and model use Pi's default;
+- `targetLanguages`: the language dropdown values;
+- `defaultAgent` and `defaultTargetLanguage`;
+- `prompt`: a custom template supporting `{instructions}`, `{source_language}`, `{target_language}`, and required `{text}` placeholders.
+
+The Rewrite dialog provides two configuration controls:
+
+1. **Open config** launches the JSON file through the operating system's default associated editor.
+2. **Reload config** validates the saved file and repopulates both dropdowns without restarting Ghostwriter.
+
+The file is also reloaded immediately before each Rewrite dialog opens. A failed manual reload leaves the edited file untouched and keeps the last valid in-memory settings, so the user can correct it. A malformed file found during app startup is instead moved aside as `config.broken-<pid>.json` and replaced with safe defaults.
+
+### Customization details
+
+- Agent names must be unique. `provider` and `model` must either both be blank (Pi's default) or both contain IDs available from `pi --list-models`.
+- Defaults must reference values present in their respective arrays.
+- JSON comments are invalid and must not be added to `config.json`.
+- `{text}` is the protected draft and is mandatory in every custom prompt.
+- `{instructions}` contains the generated Translate/Tidy task list.
+- `{source_language}` and `{target_language}` expose the selected language values.
+- Custom prompts should retain a direct instruction to preserve every `__GW_*_ATTACHMENT_####__` token exactly once. Local integrity validation remains authoritative.
+
+The generated default prompt treats attachment placeholders as immutable, tells the model to return only the draft, and explicitly forbids headings for short or single-section text.
 
 ## Review loop
 
 1. Press `F4` or select **Rewrite**.
 2. Choose translation and/or tidying.
 3. Set source and target languages.
-4. Optionally set a Pi provider and model. Blank fields use Pi's default; when available, the selected Pi TUI target's current model pre-fills the fields.
-5. Select **Run** or press `Ctrl+Enter` to start Pi RPC.
-6. Review the returned draft.
-7. Accept, reject, edit directly, or provide revision feedback.
-8. Revisions reuse the same live RPC conversation.
+4. Choose a rewrite agent from the configured dropdown.
+5. If needed, select **Open config**, save edits, and select **Reload config**.
+6. Select **Run** or press `Ctrl+Enter`; the already-warm RPC is used when enabled.
+7. Review the returned draft.
+8. Accept, reject, edit directly, or provide revision feedback. Revisions reuse the same live RPC conversation.
 
 The accepted result returns only to Ghostwriter. It is never injected into Pi's visible editor until the separate **Inject into Pi** action is used.

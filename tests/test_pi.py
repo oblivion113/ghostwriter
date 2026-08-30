@@ -63,6 +63,8 @@ def test_target_label_and_details_identify_session(tmp_path: Path) -> None:
     )
 
     assert target.label == "Refactor · gpt-5.6-sol · abcdef"
+    assert "Refactor" in target.summary
+    assert "openai-codex/gpt-5.6-sol:high" in target.summary
     assert "Directory" in target.details
     assert "openai-codex/gpt-5.6-sol · high" in target.details
     assert "PID 43210" in target.details

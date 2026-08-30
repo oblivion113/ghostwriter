@@ -20,7 +20,8 @@ The project has its own uv-managed `.venv`; it does not use the base Python envi
 - Compact `@filename` markers regardless of how a file was attached
 - Raw text preview for source code, Markdown, scripts, and other UTF-8 files
 - Ghostty-compatible image preview with Unicode fallback
-- Translation, tidying, and iterative revision through an isolated Pi RPC session
+- Translation, tidying, and iterative revision through one isolated, app-lifetime Pi RPC process
+- JSON-configured rewrite agents, target languages, warm-up behavior, and prompt template
 - Strict local placeholder restoration that keeps attachment details away from the rewrite model
 - Persistent draft and content-addressed image cache
 - Discovery of multiple running Pi instances
@@ -105,15 +106,50 @@ Deleting a marker from the prompt removes its unreferenced attachment automatica
 
 ## Translation and tidying
 
-Press `F4` to open the rewrite configuration. Select Translate, Tidy, or both, then choose **Run** or press `Ctrl+Enter` to start the tool-free Pi RPC process. Ghostwriter protects inline attachments with opaque placeholders and returns the result to a review dialog. You may accept, reject, directly edit, or provide revision feedback while the same RPC conversation remains alive.
+Press `F4` to open the rewrite configuration. Select Translate, Tidy, a target language, and a configured rewrite agent, then choose **Run** or press `Ctrl+Enter`. Ghostwriter protects inline attachments with opaque placeholders and returns the result to a review dialog. You may accept, reject, directly edit, or provide revision feedback in the same RPC conversation.
 
-The accepted result returns to Ghostwriter—not Pi's visible editor. Attachment mappings, paths, and content remain local. Every placeholder is validated before restoration. The temporary cached RPC session is deleted by default when the review workflow ends.
+By default, Ghostwriter starts one tool-free Pi RPC process in the background and keeps it warm for the app's lifetime. Each new rewrite receives a fresh Pi session, while revisions retain the current conversation. On exit, Ghostwriter terminates the process and deletes its private session directory. Set `rewrite.keepRpcWarm` to `false` to use one process per workflow instead.
+
+The accepted result returns to Ghostwriter—not Pi's visible editor. Attachment mappings, paths, and content remain local. Every placeholder is validated before restoration.
+
+### Configuration
+
+Ghostwriter creates one `config.json` in the platform user configuration directory on first start (on macOS, `~/Library/Application Support/ghostwriter/config.json`). It controls all rewrite choices:
+
+```json
+{
+  "version": 1,
+  "rewrite": {
+    "keepRpcWarm": true,
+    "agents": [
+      { "name": "Pi default", "provider": "", "model": "" },
+      { "name": "Fast", "provider": "anthropic", "model": "claude-haiku-4-5" }
+    ],
+    "targetLanguages": ["English", "Chinese (Simplified)", "French"],
+    "defaultAgent": "Pi default",
+    "defaultTargetLanguage": "English",
+    "prompt": "Transform the draft under these requirements:\\n{instructions}\\n\\nDRAFT START\\n{text}\\nDRAFT END"
+  }
+}
+```
+
+Select **Open config** in the Rewrite dialog to launch this file with the desktop's default associated editor. Save your edits, return to Ghostwriter, and select **Reload config** before running the rewrite. Ghostwriter also reloads the file automatically whenever the Rewrite dialog opens, so changes made while the dialog was closed are immediately available.
+
+Customization rules:
+
+- Each agent needs a unique `name`. Set both `provider` and `model` to IDs recognized by Pi (`pi --list-models`), or leave both blank to use Pi's default.
+- `defaultAgent` must match an agent name, and `defaultTargetLanguage` must appear in `targetLanguages`.
+- `{text}` is required in `prompt`. `{instructions}` expands to the selected Translate/Tidy rules; `{source_language}` and `{target_language}` expand to the chosen language values.
+- Keep the attachment-placeholder instruction when replacing the default prompt. Ghostwriter still validates placeholders locally, but clear model instructions avoid unnecessary repair requests.
+- JSON does not support comments. Use the field descriptions here rather than adding `//` or `#` lines to the file.
+
+An invalid manual reload is reported without overwriting the file, allowing you to correct it in the editor. An invalid file encountered during app startup is moved to `config.broken-<pid>.json` and replaced with safe defaults. The generated default prompt tells the model not to add headings to short, single-section drafts.
 
 See [`docs/rewrite.md`](docs/rewrite.md) for protocol and privacy details.
 
 ## Layout
 
-Ghostwriter selects a side-by-side or stacked layout from both terminal width and aspect ratio. Two mouse-draggable dividers resize the prompt independently: the outer divider changes editor width (or pane height when stacked), while the divider below the prompt changes its height. The prompt supports vertical and horizontal scrolling.
+Ghostwriter selects a side-by-side or stacked layout from both terminal width and aspect ratio. Its initial split always reserves space for the editor actions. Two mouse-draggable dividers resize the prompt independently: the outer divider changes editor width (or pane height when stacked), while the divider below the prompt changes its height. Pi sessions appear as concise rows in one scrollable target list; redundant details are not repeated below it. The prompt supports vertical and horizontal scrolling.
 
 ## Architecture
 

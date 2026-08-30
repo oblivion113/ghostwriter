@@ -5,9 +5,11 @@ from pathlib import Path
 import pytest
 from textual import events
 from textual.containers import VerticalScroll
+from textual.widgets import OptionList
 
 from ghostwriter.app import GhostwriterApp
 from ghostwriter.model import Draft
+from ghostwriter.pi import PiTarget
 from ghostwriter.storage import DraftStore
 
 
@@ -111,6 +113,33 @@ async def test_code_attachment_has_raw_text_preview(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
+async def test_target_sessions_are_concise_in_one_scrollable_list(tmp_path: Path) -> None:
+    app = GhostwriterApp()
+    app.draft = Draft(text="")
+    app.store = DraftStore(tmp_path / "draft.json")
+    target = PiTarget(
+        pid=42,
+        session_id="abcdef123456",
+        session_name="Refactor",
+        cwd=tmp_path / "ghostwriter",
+        socket_path=tmp_path / "pi.sock",
+        provider="anthropic",
+        model_id="claude-sonnet",
+        thinking_level="high",
+    )
+    app.pi.discover_targets = lambda: [target]  # type: ignore[method-assign]
+
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+        target_list = app.query_one("#target", OptionList)
+
+        assert target_list.option_count == 1
+        assert app._selected_target() == target
+        assert "Refactor" in str(target_list.get_option_at_index(0).prompt)
+        assert not app.query("#target-details")
+
+
+@pytest.mark.asyncio
 async def test_narrow_side_pane_scrolls_to_hidden_controls(tmp_path: Path) -> None:
     app = GhostwriterApp()
     app.draft = Draft(text="")
@@ -122,6 +151,9 @@ async def test_narrow_side_pane_scrolls_to_hidden_controls(tmp_path: Path) -> No
 
         assert app.screen.has_class("stacked")
         assert side_pane.max_scroll_y > 0
+        actions = app.query_one("#actions")
+        editor = app.query_one("#editor-pane")
+        assert actions.region.bottom <= editor.region.bottom
 
 
 @pytest.mark.asyncio

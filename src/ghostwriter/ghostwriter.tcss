@@ -107,20 +107,17 @@ Header {
 }
 
 #target-row {
-    height: 3;
+    height: 6;
     margin-bottom: 1;
-    align-vertical: middle;
+    align-vertical: top;
 }
 
 #target {
     width: 1fr;
+    height: 6;
     margin-right: 1;
-}
-
-#target-details {
-    height: 4;
-    margin-bottom: 1;
-    color: #9199a6;
+    border: round #2d333d;
+    background: #14181e;
 }
 
 #remove-attachment {
@@ -225,7 +222,8 @@ RewriteReviewScreen {
     margin-right: 1;
 }
 
-#rewrite-config-dialog Input {
+#rewrite-config-dialog Input,
+#rewrite-config-dialog Select {
     margin-bottom: 0;
 }
 

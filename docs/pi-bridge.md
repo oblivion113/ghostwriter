@@ -190,9 +190,25 @@ Paths containing quotes or line breaks are rejected because they cannot be repre
 - The extension never submits prompts.
 - Registry data contains local paths and model metadata, so it must not be copied to logs or remote services by default.
 
+## Rewrite RPC lifecycle
+
+The rewrite child is separate from the visible TUI bridge. Ghostwriter starts `pi --mode rpc` with tools, extensions, skills, prompt templates, and project context disabled. Pi RPC is a persistent stdin/stdout protocol: keeping the subprocess alive is sufficient to keep its model runtime warm.
+
+Ghostwriter uses these documented RPC commands:
+
+| Command | Purpose |
+| --- | --- |
+| `get_state` | Confirm startup and remember Pi's default provider/model |
+| `new_session` | Clear conversation state between independent rewrite workflows |
+| `set_model` | Select the named agent from Ghostwriter's configuration |
+| `prompt` | Start a transform or review revision |
+| `get_last_assistant_text` | Retrieve the settled result |
+
+The default app-lifetime process still uses a private persistent session directory because Pi's RPC session replacement API is being used. All session files are deleted with that directory during normal Ghostwriter shutdown. Setting `rewrite.keepRpcWarm` to `false` restores per-workflow process cleanup.
+
 ## Coordinated changes
 
-When changing the bridge:
+When changing the bridge or rewrite RPC integration:
 
 1. update protocol constants and message fields in Python and TypeScript together;
 2. preserve request bounds and target validation;

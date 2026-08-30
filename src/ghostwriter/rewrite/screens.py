@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
+from pathlib import Path
 from typing import ClassVar, Literal
 
 from textual import on
@@ -8,7 +10,9 @@ from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.screen import ModalScreen
-from textual.widgets import Button, Checkbox, Input, Label, Static, TextArea
+from textual.widgets import Button, Checkbox, Input, Label, Select, Static, TextArea
+
+from ghostwriter.config import RewriteConfig
 
 from .service import RewriteOptions
 
@@ -19,16 +23,39 @@ class RewriteConfigScreen(ModalScreen[RewriteOptions | None]):
         Binding("escape", "cancel", "Cancel"),
     ]
 
-    def __init__(self, defaults: RewriteOptions) -> None:
+    def __init__(
+        self,
+        defaults: RewriteOptions,
+        config: RewriteConfig | None = None,
+        config_path: Path | None = None,
+        *,
+        open_config: Callable[[], None] | None = None,
+        reload_config: Callable[[], RewriteConfig] | None = None,
+    ) -> None:
         super().__init__()
         self.defaults = defaults
+        self.config = config or RewriteConfig()
+        self.config_path = config_path
+        self.open_config = open_config
+        self.reload_config = reload_config
 
     def compose(self) -> ComposeResult:
+        target_language = (
+            self.defaults.target_language
+            if self.defaults.target_language in self.config.target_languages
+            else self.config.default_target_language
+        )
+        agent_name = (
+            self.defaults.agent
+            if self.defaults.agent in {agent.name for agent in self.config.agents}
+            else self.config.default_agent
+        )
         with VerticalScroll(id="rewrite-config-dialog"):
             yield Label("TRANSLATE / TIDY", classes="dialog-title")
+            config_label = str(self.config_path) if self.config_path is not None else "config.json"
             yield Static(
-                "Choose Translate, Tidy, or both. Select Run or press Ctrl+Enter to start Pi RPC. "
-                "Attachments stay local.",
+                f"Choose Translate, Tidy, or both. Choices come from {config_label}. "
+                "After editing, reload before running. Attachments stay local.",
                 classes="dialog-help",
             )
             with Horizontal(classes="checkbox-row"):
@@ -47,14 +74,18 @@ class RewriteConfigScreen(ModalScreen[RewriteOptions | None]):
             yield Label("Source language")
             yield Input(self.defaults.source_language, id="rewrite-source")
             yield Label("Target language")
-            yield Input(self.defaults.target_language, id="rewrite-target")
-            yield Label("Provider (optional)")
-            yield Input(self.defaults.provider, placeholder="anthropic", id="rewrite-provider")
-            yield Label("Model (blank uses Pi default)")
-            yield Input(
-                self.defaults.model,
-                placeholder="provider/model-id or model-id",
-                id="rewrite-model",
+            yield Select(
+                [(language, language) for language in self.config.target_languages],
+                value=target_language,
+                allow_blank=False,
+                id="rewrite-target",
+            )
+            yield Label("Rewrite agent")
+            yield Select(
+                [(agent.name, agent.name) for agent in self.config.agents],
+                value=agent_name,
+                allow_blank=False,
+                id="rewrite-agent",
             )
             with Horizontal(classes="dialog-actions"):
                 yield Button(
@@ -63,6 +94,22 @@ class RewriteConfigScreen(ModalScreen[RewriteOptions | None]):
                     classes="tool-button primary-action",
                     compact=True,
                     flat=True,
+                )
+                yield Button(
+                    "Open config",
+                    id="rewrite-open-config",
+                    classes="tool-button",
+                    compact=True,
+                    flat=True,
+                    disabled=self.open_config is None,
+                )
+                yield Button(
+                    "Reload config",
+                    id="rewrite-reload-config",
+                    classes="tool-button",
+                    compact=True,
+                    flat=True,
+                    disabled=self.reload_config is None,
                 )
                 yield Button(
                     "Cancel",
@@ -83,13 +130,20 @@ class RewriteConfigScreen(ModalScreen[RewriteOptions | None]):
         self._start()
 
     def _start(self) -> None:
+        target_value = self.query_one("#rewrite-target", Select).value
+        agent_value = self.query_one("#rewrite-agent", Select).value
+        target_language = "" if target_value is Select.NULL else str(target_value)
+        agent_name = self.config.default_agent if agent_value is Select.NULL else str(agent_value)
+        agent = self.config.agent(agent_name)
         options = RewriteOptions(
             translate=self.query_one("#rewrite-translate", Checkbox).value,
             tidy=self.query_one("#rewrite-tidy", Checkbox).value,
             source_language=self.query_one("#rewrite-source", Input).value.strip(),
-            target_language=self.query_one("#rewrite-target", Input).value.strip(),
-            provider=self.query_one("#rewrite-provider", Input).value.strip(),
-            model=self.query_one("#rewrite-model", Input).value.strip(),
+            target_language=target_language,
+            provider=agent.provider,
+            model=agent.model,
+            agent=agent.name,
+            prompt=self.config.prompt,
         )
         try:
             options.validate()
@@ -97,6 +151,43 @@ class RewriteConfigScreen(ModalScreen[RewriteOptions | None]):
             self.notify(str(error), severity="warning")
             return
         self.dismiss(options)
+
+    @on(Button.Pressed, "#rewrite-open-config")
+    def open_config_button(self) -> None:
+        if self.open_config is None:
+            return
+        try:
+            self.open_config()
+        except OSError as error:
+            self.notify(f"Could not open config: {error}", severity="error")
+            return
+        self.notify("Config opened. Save it, then select Reload config.")
+
+    @on(Button.Pressed, "#rewrite-reload-config")
+    def reload_config_button(self) -> None:
+        if self.reload_config is None:
+            return
+        try:
+            config = self.reload_config()
+        except (OSError, TypeError, ValueError) as error:
+            self.notify(f"Could not reload config: {error}", severity="error")
+            return
+
+        target = self.query_one("#rewrite-target", Select)
+        agent = self.query_one("#rewrite-agent", Select)
+        current_target = None if target.value is Select.NULL else str(target.value)
+        current_agent = None if agent.value is Select.NULL else str(agent.value)
+        self.config = config
+        target.set_options((language, language) for language in config.target_languages)
+        agent.set_options((item.name, item.name) for item in config.agents)
+        target.value = (
+            current_target
+            if current_target in config.target_languages
+            else config.default_target_language
+        )
+        agent_names = {item.name for item in config.agents}
+        agent.value = current_agent if current_agent in agent_names else config.default_agent
+        self.notify("Config reloaded")
 
     @on(Button.Pressed, "#rewrite-cancel")
     def cancel_button(self) -> None:
