@@ -61,11 +61,17 @@ Header {
     height: 1fr;
     border: round #343b46;
     background: #14181e;
+    color: #ffffff;
     padding: 0 1;
 }
 
 #prompt-editor:focus {
     border: round #8d97a6;
+}
+
+PromptTextArea .prompt-attachment {
+    color: #7aa2f7;
+    text-style: bold;
 }
 
 #file-completions {

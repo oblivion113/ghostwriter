@@ -43,11 +43,10 @@ async def test_rewrite_config_selects_configured_language_and_agent(tmp_path: Pa
     app.store = DraftStore(tmp_path / "draft.json")
     config = RewriteConfig(
         agents=(
-            RewriteAgent("Default"),
-            RewriteAgent("Fast", "anthropic", "claude-haiku"),
+            RewriteAgent(),
+            RewriteAgent("anthropic", "claude-haiku"),
         ),
         target_languages=("English", "French"),
-        default_agent="Default",
     )
 
     async with app.run_test(size=(80, 28)) as pilot:
@@ -56,13 +55,13 @@ async def test_rewrite_config_selects_configured_language_and_agent(tmp_path: Pa
         app.push_screen(screen, callback=results.append)
         await pilot.pause()
         screen.query_one("#rewrite-target").value = "French"
-        screen.query_one("#rewrite-agent").value = "Fast"
+        screen.query_one("#rewrite-agent").value = "anthropic/claude-haiku"
         screen._start()
         await pilot.pause()
 
         assert results[0] is not None
         assert results[0].target_language == "French"
-        assert results[0].agent == "Fast"
+        assert results[0].agent == "anthropic/claude-haiku"
         assert results[0].provider == "anthropic"
         assert results[0].model == "claude-haiku"
 
@@ -73,23 +72,22 @@ async def test_rewrite_config_can_open_and_reload_edited_choices(tmp_path: Path)
     app.draft = Draft(text="Rewrite me")
     app.store = DraftStore(tmp_path / "draft.json")
     initial = RewriteConfig(
-        agents=(RewriteAgent("Fast", "anthropic", "claude-haiku"),),
+        agents=(RewriteAgent("anthropic", "claude-haiku"),),
         target_languages=("French",),
-        default_agent="Fast",
         default_target_language="French",
     )
     edited = RewriteConfig(
-        agents=(RewriteAgent("Careful", "openai", "gpt-test"),),
+        agents=(RewriteAgent("openai", "gpt-test"),),
         target_languages=("Japanese",),
-        default_agent="Careful",
         default_target_language="Japanese",
-        prompt="Write in {target_language}.\n{text}",
+        instructions="Keep it concise.",
+        prompt="Write in {target_language}.\n{instructions}\n{text}",
     )
     opened: list[bool] = []
 
     async with app.run_test(size=(88, 30)) as pilot:
         screen = RewriteConfigScreen(
-            RewriteOptions(agent="Fast", target_language="French"),
+            RewriteOptions(agent="anthropic/claude-haiku", target_language="French"),
             initial,
             tmp_path / "config.json",
             open_config=lambda: opened.append(True),
@@ -104,6 +102,6 @@ async def test_rewrite_config_can_open_and_reload_edited_choices(tmp_path: Path)
 
         assert opened == [True]
         assert screen.query_one("#rewrite-target").value == "Japanese"
-        assert screen.query_one("#rewrite-agent").value == "Careful"
+        assert screen.query_one("#rewrite-agent").value == "openai/gpt-test"
         assert screen.query_one("#rewrite-open-config").region.y < screen.size.height
         assert screen.query_one("#rewrite-reload-config").region.y < screen.size.height

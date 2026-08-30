@@ -17,7 +17,8 @@ class RewriteOptions:
     target_language: str = "English"
     provider: str = ""
     model: str = ""
-    agent: str = "Pi default"
+    agent: str = "agent-plan/ark-code-latest"
+    instructions: str = ""
     prompt: str = DEFAULT_REWRITE_PROMPT
 
     def validate(self) -> None:
@@ -67,6 +68,8 @@ class RewriteSession:
             )
 
         instructions = "\n".join(f"- {task}" for task in tasks)
+        if custom_instructions := options.instructions.strip():
+            instructions += f"\n- Apply these additional user instructions:\n{custom_instructions}"
         return options.prompt.format(
             instructions=instructions,
             source_language=options.source_language.strip() or "auto-detect",

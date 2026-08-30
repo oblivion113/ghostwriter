@@ -60,13 +60,13 @@ Deleting the final display marker removes its attachment metadata. Removing an a
 
 ### File completion
 
-The selected Pi session's working directory is the project root. `files.py` indexes up to 20,000 files while skipping `.git`, `.venv`, `node_modules`, and `__pycache__`. Relative queries are ranked by filename and path match. Queries beginning with `/` or `~` use direct filesystem completion. Tab accepts the highlighted candidate.
+The selected Pi session's working directory is the project root. `files.py` prefers `fd` for a bounded 20,000-file index that respects project and configured ignore files. It then runs `fzf --filter` over that in-memory index for path-aware fuzzy ranking; global fzf options are inherited unless disabled in `fileSearch`. Neither executable is required. Missing or failed tools fall back to the bounded Python walk and deterministic substring ranking, with hidden files and common cache, dependency, and build directories excluded by default. Queries beginning with `/` or `~` use direct filesystem completion. Tab accepts the highlighted candidate.
 
 ## Rewrite flow
 
 Rewrite is separate from visible Pi injection:
 
-1. `ConfigStore` supplies named agents, target languages, warm-up policy, and the prompt template.
+1. `ConfigStore` supplies file-search policy, ordered provider/model agents, target languages, extra instructions, warm-up policy, and the prompt template.
 2. App startup normally launches `PiRpcSession` once with tools and project resources disabled.
 3. `RewriteConfigScreen` returns validated `RewriteOptions` from configured dropdowns.
 4. `PiRpcSession.prepare()` starts a fresh Pi session for every workflow after the first and selects its configured model.
@@ -81,11 +81,13 @@ No attachment path, filename, or content is sent to the rewrite model.
 
 Textual owns terminal rendering and input. Important custom behavior includes:
 
-- `PromptTextArea`: intercepts bracketed paste and Tab completion;
+- `PromptTextArea`: intercepts bracketed paste and Tab completion, keeps prose white across themes, and styles active attachment markers without changing their text;
 - `DragHandle`: captures mouse events directly for independent width and height resizing;
 - `OptionList`: presents complete, concise Pi target identity in one scrollable box;
 - `VerticalScroll`: keeps the side pane reachable in constrained layouts;
 - thread worker: runs blocking native file pickers without freezing Textual;
+- curated theme registration: exposes only comfortable dark choices in Textual's theme picker;
+- filtered system commands: removes Textual's SVG screenshot export from the command palette;
 - async workers: perform socket injection and Pi RPC communication.
 
 The app switches between side-by-side and stacked layouts using terminal width and aspect ratio. TextArea supplies clipboard handling, history, selection, and both scroll axes.

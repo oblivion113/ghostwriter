@@ -12,6 +12,8 @@ from typing import Any
 
 from platformdirs import user_config_path
 
+from .files import DEFAULT_SKIPPED_DIRECTORIES
+
 CONFIG_VERSION = 1
 DEFAULT_REWRITE_PROMPT = """Transform the draft under these requirements:
 {instructions}
@@ -27,33 +29,35 @@ _ALLOWED_PROMPT_FIELDS = {"instructions", "source_language", "target_language", 
 
 @dataclass(frozen=True, slots=True)
 class RewriteAgent:
-    name: str
     provider: str = ""
     model: str = ""
+
+    @property
+    def label(self) -> str:
+        return f"{self.provider}/{self.model}" if self.provider and self.model else "Pi default"
 
     @classmethod
     def from_dict(cls, data: object) -> RewriteAgent:
         if not isinstance(data, dict):
             raise TypeError("Each rewrite agent must be an object")
         agent = cls(
-            name=str(data.get("name", "")).strip(),
             provider=str(data.get("provider", "")).strip(),
             model=str(data.get("model", "")).strip(),
         )
-        if not agent.name:
-            raise ValueError("Each rewrite agent needs a name")
         if bool(agent.provider) != bool(agent.model):
-            raise ValueError(f"Rewrite agent {agent.name!r} must set both provider and model")
+            raise ValueError(
+                "Each rewrite agent must set both provider and model, or leave both blank"
+            )
         return agent
 
     def to_dict(self) -> dict[str, str]:
-        return {"name": self.name, "provider": self.provider, "model": self.model}
+        return {"provider": self.provider, "model": self.model}
 
 
 @dataclass(frozen=True, slots=True)
 class RewriteConfig:
     keep_rpc_warm: bool = True
-    agents: tuple[RewriteAgent, ...] = (RewriteAgent("Pi default"),)
+    agents: tuple[RewriteAgent, ...] = (RewriteAgent("agent-plan", "ark-code-latest"),)
     target_languages: tuple[str, ...] = (
         "English",
         "Chinese (Simplified)",
@@ -62,15 +66,17 @@ class RewriteConfig:
         "Japanese",
         "Spanish",
     )
-    default_agent: str = "Pi default"
     default_target_language: str = "English"
+    instructions: str = ""
     prompt: str = DEFAULT_REWRITE_PROMPT
 
     @classmethod
     def from_dict(cls, data: object) -> RewriteConfig:
         if not isinstance(data, dict):
             raise TypeError("rewrite must be an object")
-        agents_data = data.get("agents", [RewriteAgent("Pi default").to_dict()])
+        agents_data = data.get(
+            "agents", [RewriteAgent("agent-plan", "ark-code-latest").to_dict()]
+        )
         languages_data = data.get("targetLanguages", list(cls().target_languages))
         if not isinstance(agents_data, list) or not agents_data:
             raise ValueError("rewrite.agents must be a non-empty array")
@@ -81,19 +87,37 @@ class RewriteConfig:
         languages = tuple(str(item).strip() for item in languages_data)
         if any(not language for language in languages):
             raise ValueError("Target language names cannot be empty")
-        if len({agent.name for agent in agents}) != len(agents):
-            raise ValueError("Rewrite agent names must be unique")
+        if len({agent.label for agent in agents}) != len(agents):
+            raise ValueError("Rewrite provider/model pairs must be unique")
         if len(set(languages)) != len(languages):
             raise ValueError("Target language names must be unique")
 
-        default_agent = str(data.get("defaultAgent", agents[0].name)).strip()
+        legacy_default = str(data.get("defaultAgent", "")).strip()
+        if legacy_default:
+            legacy_names = [
+                str(item.get("name", "")).strip() if isinstance(item, dict) else ""
+                for item in agents_data
+            ]
+            default_index = next(
+                (
+                    index
+                    for index, agent in enumerate(agents)
+                    if legacy_default in {agent.label, legacy_names[index]}
+                ),
+                0,
+            )
+            agents = (
+                (agents[default_index],)
+                + agents[:default_index]
+                + agents[default_index + 1 :]
+            )
+
         default_language = str(data.get("defaultTargetLanguage", languages[0])).strip()
+        instructions = str(data.get("instructions", ""))
         prompt = str(data.get("prompt", DEFAULT_REWRITE_PROMPT))
         keep_rpc_warm = data.get("keepRpcWarm", True)
         if not isinstance(keep_rpc_warm, bool):
             raise TypeError("rewrite.keepRpcWarm must be true or false")
-        if default_agent not in {agent.name for agent in agents}:
-            raise ValueError("rewrite.defaultAgent must name an entry in rewrite.agents")
         if default_language not in languages:
             raise ValueError(
                 "rewrite.defaultTargetLanguage must be listed in rewrite.targetLanguages"
@@ -103,28 +127,89 @@ class RewriteConfig:
             keep_rpc_warm=keep_rpc_warm,
             agents=agents,
             target_languages=languages,
-            default_agent=default_agent,
             default_target_language=default_language,
+            instructions=instructions,
             prompt=prompt,
         )
 
-    def agent(self, name: str) -> RewriteAgent:
-        return next((agent for agent in self.agents if agent.name == name), self.agents[0])
+    @property
+    def default_agent(self) -> RewriteAgent:
+        return self.agents[0]
+
+    def agent(self, label: str) -> RewriteAgent:
+        return next((agent for agent in self.agents if agent.label == label), self.default_agent)
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "keepRpcWarm": self.keep_rpc_warm,
             "agents": [agent.to_dict() for agent in self.agents],
             "targetLanguages": list(self.target_languages),
-            "defaultAgent": self.default_agent,
             "defaultTargetLanguage": self.default_target_language,
+            "instructions": self.instructions,
             "prompt": self.prompt,
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class FileSearchConfig:
+    include_hidden: bool = False
+    use_global_fzf_options: bool = True
+    skipped_directories: tuple[str, ...] = DEFAULT_SKIPPED_DIRECTORIES
+    ignore_files: tuple[Path, ...] = ()
+    fzf_options: tuple[str, ...] = ()
+
+    @classmethod
+    def from_dict(cls, data: object) -> FileSearchConfig:
+        if not isinstance(data, dict):
+            raise TypeError("fileSearch must be an object")
+        include_hidden = data.get("includeHidden", False)
+        use_global_options = data.get("useGlobalFzfOptions", True)
+        skipped_data = data.get("skipDirectories", list(DEFAULT_SKIPPED_DIRECTORIES))
+        ignore_data = data.get("ignoreFiles", [])
+        options_data = data.get("fzfOptions", [])
+        if not isinstance(include_hidden, bool):
+            raise TypeError("fileSearch.includeHidden must be true or false")
+        if not isinstance(use_global_options, bool):
+            raise TypeError("fileSearch.useGlobalFzfOptions must be true or false")
+        if not isinstance(skipped_data, list) or not all(
+            isinstance(item, str) and item.strip() for item in skipped_data
+        ):
+            raise TypeError("fileSearch.skipDirectories must be an array of names")
+        skipped = tuple(item.strip() for item in skipped_data)
+        if any("/" in item or "\\" in item for item in skipped):
+            raise ValueError("fileSearch.skipDirectories entries must be directory names")
+        if not isinstance(ignore_data, list) or not all(
+            isinstance(item, str) and item.strip() for item in ignore_data
+        ):
+            raise TypeError("fileSearch.ignoreFiles must be an array of paths")
+        if not isinstance(options_data, list) or not all(
+            isinstance(item, str) and item.strip() and "\0" not in item for item in options_data
+        ):
+            raise TypeError("fileSearch.fzfOptions must be an array of options")
+        if len(set(skipped)) != len(skipped):
+            raise ValueError("fileSearch.skipDirectories entries must be unique")
+        return cls(
+            include_hidden=include_hidden,
+            use_global_fzf_options=use_global_options,
+            skipped_directories=skipped,
+            ignore_files=tuple(Path(item).expanduser() for item in ignore_data),
+            fzf_options=tuple(item.strip() for item in options_data),
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "includeHidden": self.include_hidden,
+            "useGlobalFzfOptions": self.use_global_fzf_options,
+            "skipDirectories": list(self.skipped_directories),
+            "ignoreFiles": [str(path) for path in self.ignore_files],
+            "fzfOptions": list(self.fzf_options),
         }
 
 
 @dataclass(frozen=True, slots=True)
 class GhostwriterConfig:
     version: int = CONFIG_VERSION
+    file_search: FileSearchConfig = field(default_factory=FileSearchConfig)
     rewrite: RewriteConfig = field(default_factory=RewriteConfig)
 
     @classmethod
@@ -134,10 +219,18 @@ class GhostwriterConfig:
         version = data.get("version", CONFIG_VERSION)
         if version != CONFIG_VERSION:
             raise ValueError(f"Unsupported Ghostwriter config version: {version!r}")
-        return cls(version=CONFIG_VERSION, rewrite=RewriteConfig.from_dict(data.get("rewrite", {})))
+        return cls(
+            version=CONFIG_VERSION,
+            file_search=FileSearchConfig.from_dict(data.get("fileSearch", {})),
+            rewrite=RewriteConfig.from_dict(data.get("rewrite", {})),
+        )
 
     def to_dict(self) -> dict[str, Any]:
-        return {"version": self.version, "rewrite": self.rewrite.to_dict()}
+        return {
+            "version": self.version,
+            "fileSearch": self.file_search.to_dict(),
+            "rewrite": self.rewrite.to_dict(),
+        }
 
 
 def validate_prompt_template(template: str) -> None:

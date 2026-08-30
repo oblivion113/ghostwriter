@@ -9,8 +9,9 @@ This repository is both a Python application and a Pi package. Python provides t
 - Node.js and npm
 - Pi 0.84.4 or a compatible release exposing the APIs documented in [`pi-bridge.md`](pi-bridge.md)
 - A terminal with mouse reporting and bracketed paste support; Ghostty is the primary target
+- Optional: `fd` for ignored-aware indexing and `fzf` for fuzzy `@` ranking
 
-macOS uses Finder through `osascript` for file selection. Other platforms use Python's Tk file dialog when available.
+macOS uses Finder through `osascript` for file selection. Other platforms use Python's Tk file dialog when available. Missing `fd` or `fzf` automatically uses the native Python search fallback.
 
 ## One-command setup
 

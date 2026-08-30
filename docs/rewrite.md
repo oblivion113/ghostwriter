@@ -39,9 +39,9 @@ Set `rewrite.keepRpcWarm` to `false` to launch lazily and close after each rewri
 On first start, Ghostwriter writes `config.json` under `user_config_path("ghostwriter")`. The `rewrite` object defines:
 
 - `keepRpcWarm`: whether app startup prewarms and retains the RPC process;
-- `agents`: named `{name, provider, model}` choices; blank provider and model use Pi's default;
-- `targetLanguages`: the language dropdown values;
-- `defaultAgent` and `defaultTargetLanguage`;
+- `agents`: ordered `{provider, model}` choices; the first entry is the default, and a pair of blank values offers Pi's default;
+- `targetLanguages` and `defaultTargetLanguage`: the language dropdown values and default;
+- `instructions`: optional standing user directions, stored directly in JSON rather than an external file;
 - `prompt`: a custom template supporting `{instructions}`, `{source_language}`, `{target_language}`, and required `{text}` placeholders.
 
 The Rewrite dialog provides two configuration controls:
@@ -53,11 +53,11 @@ The file is also reloaded immediately before each Rewrite dialog opens. A failed
 
 ### Customization details
 
-- Agent names must be unique. `provider` and `model` must either both be blank (Pi's default) or both contain IDs available from `pi --list-models`.
-- Defaults must reference values present in their respective arrays.
+- Provider/model pairs must be unique and either both blank (Pi's default) or both contain IDs available from `pi --list-models`. Dropdown labels are derived as `provider/model`; no name field is used.
+- The first agent is the default. `defaultTargetLanguage` must reference a value in `targetLanguages`.
 - JSON comments are invalid and must not be added to `config.json`.
 - `{text}` is the protected draft and is mandatory in every custom prompt.
-- `{instructions}` contains the generated Translate/Tidy task list.
+- `{instructions}` contains the generated Translate/Tidy task list followed by the optional `instructions` field. Leave the field as `""` for no extra directions.
 - `{source_language}` and `{target_language}` expose the selected language values.
 - Custom prompts should retain a direct instruction to preserve every `__GW_*_ATTACHMENT_####__` token exactly once. Local integrity validation remains authoritative.
 

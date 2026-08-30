@@ -6,7 +6,12 @@ from unittest.mock import Mock
 
 import pytest
 
-from ghostwriter.config import DEFAULT_REWRITE_PROMPT, ConfigStore, open_config_file
+from ghostwriter.config import (
+    DEFAULT_REWRITE_PROMPT,
+    ConfigStore,
+    GhostwriterConfig,
+    open_config_file,
+)
 
 
 def test_config_store_creates_editable_defaults(tmp_path: Path) -> None:
@@ -15,8 +20,15 @@ def test_config_store_creates_editable_defaults(tmp_path: Path) -> None:
     config = ConfigStore(path).load()
 
     assert path.is_file()
+    assert config.file_search.include_hidden is False
+    assert config.file_search.use_global_fzf_options
+    assert "node_modules" in config.file_search.skipped_directories
+    assert "fileSearch" in path.read_text(encoding="utf-8")
     assert config.rewrite.keep_rpc_warm
-    assert config.rewrite.default_agent == "Pi default"
+    assert config.rewrite.default_agent.provider == "agent-plan"
+    assert config.rewrite.default_agent.model == "ark-code-latest"
+    assert config.rewrite.instructions == ""
+    assert "name" not in path.read_text(encoding="utf-8")
     assert "{text}" in config.rewrite.prompt
 
 
@@ -26,19 +38,25 @@ def test_config_loads_agents_languages_and_custom_prompt(tmp_path: Path) -> None
         json.dumps(
             {
                 "version": 1,
+                "fileSearch": {
+                    "includeHidden": True,
+                    "useGlobalFzfOptions": False,
+                    "skipDirectories": ["node_modules", "__pycache__"],
+                    "ignoreFiles": ["~/.config/search/ignore"],
+                    "fzfOptions": ["--exact"],
+                },
                 "rewrite": {
                     "keepRpcWarm": False,
                     "agents": [
                         {
-                            "name": "Fast",
                             "provider": "anthropic",
                             "model": "claude-haiku",
                         }
                     ],
                     "targetLanguages": ["English", "French"],
-                    "defaultAgent": "Fast",
                     "defaultTargetLanguage": "French",
-                    "prompt": "Write in {target_language}.\n\n{text}",
+                    "instructions": "Use a direct tone.",
+                    "prompt": "Write in {target_language}.\n{instructions}\n{text}",
                 },
             }
         ),
@@ -47,9 +65,35 @@ def test_config_loads_agents_languages_and_custom_prompt(tmp_path: Path) -> None
 
     config = ConfigStore(path).load()
 
+    assert config.file_search.include_hidden
+    assert not config.file_search.use_global_fzf_options
+    assert config.file_search.fzf_options == ("--exact",)
+    assert config.file_search.ignore_files[0].is_absolute()
     assert not config.rewrite.keep_rpc_warm
-    assert config.rewrite.agent("Fast").model == "claude-haiku"
+    assert config.rewrite.default_agent.label == "anthropic/claude-haiku"
     assert config.rewrite.default_target_language == "French"
+    assert config.rewrite.instructions == "Use a direct tone."
+
+
+def test_legacy_named_default_agent_is_migrated_to_first_provider_model() -> None:
+    config = GhostwriterConfig.from_dict(
+        {
+            "version": 1,
+            "rewrite": {
+                "agents": [
+                    {"name": "Fast", "provider": "anthropic", "model": "haiku"},
+                    {"name": "Plan", "provider": "agent-plan", "model": "ark-code-latest"},
+                ],
+                "defaultAgent": "Plan",
+                "targetLanguages": ["English"],
+            },
+        }
+    )
+
+    assert config.rewrite.default_agent.label == "agent-plan/ark-code-latest"
+    serialized = config.to_dict()["rewrite"]
+    assert "defaultAgent" not in serialized
+    assert all("name" not in agent for agent in serialized["agents"])
 
 
 def test_config_reload_reports_invalid_edits_without_replacing_them(tmp_path: Path) -> None:
@@ -90,7 +134,7 @@ def test_invalid_config_is_quarantined_and_replaced(tmp_path: Path) -> None:
             {
                 "version": 1,
                 "rewrite": {
-                    "agents": [{"name": "Broken", "provider": "anthropic"}],
+                    "agents": [{"provider": "anthropic"}],
                     "targetLanguages": ["English"],
                     "prompt": "missing text placeholder",
                 },

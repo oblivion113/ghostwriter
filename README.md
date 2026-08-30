@@ -100,7 +100,9 @@ Ghostwriter presents every file through the same attachment interface. Internall
 
 Drag files directly into the prompt, select **Attach** to open the native multi-file picker, or type `@` to search the selected Pi session's working directory recursively. Absolute paths and `~` paths are also completed. Every route inserts the same compact `@filename` marker and adds the same filename-only row to Attachments. Pi serialization replaces the display marker in place with Pi's actual file or image reference.
 
-Selecting an attachment previews images visually and displays UTF-8 files—including source code, scripts, tests, and Markdown—as raw text. Binary and oversized files are handled safely; large text previews are truncated.
+When available, `fd` builds the bounded project index and `fzf` ranks fuzzy matches without opening a second terminal UI. Both tools remain optional: the Python fallback excludes hidden files and common cache, dependency, and build directories. Project ignore files are respected by `fd`, and additional exclusions are configurable.
+
+Selecting an attachment previews images visually and displays UTF-8 files—including source code, scripts, tests, and Markdown—as raw text. Plain prompt text stays white across every available theme, while attached `@filename` markers use a distinct blue style. Binary and oversized files are handled safely; large text previews are truncated.
 
 Deleting a marker from the prompt removes its unreferenced attachment automatically. Selecting an attachment and choosing **Remove** performs the inverse atomic operation: it removes the attachment and every matching marker from the prompt.
 
@@ -114,20 +116,26 @@ The accepted result returns to Ghostwriter—not Pi's visible editor. Attachment
 
 ### Configuration
 
-Ghostwriter creates one `config.json` in the platform user configuration directory on first start (on macOS, `~/Library/Application Support/ghostwriter/config.json`). It controls all rewrite choices:
+Ghostwriter creates one `config.json` in the platform user configuration directory on first start (on macOS, `~/Library/Application Support/ghostwriter/config.json`). It controls file search and rewrite choices:
 
 ```json
 {
   "version": 1,
+  "fileSearch": {
+    "includeHidden": false,
+    "useGlobalFzfOptions": true,
+    "ignoreFiles": [],
+    "fzfOptions": []
+  },
   "rewrite": {
     "keepRpcWarm": true,
     "agents": [
-      { "name": "Pi default", "provider": "", "model": "" },
-      { "name": "Fast", "provider": "anthropic", "model": "claude-haiku-4-5" }
+      { "provider": "agent-plan", "model": "ark-code-latest" },
+      { "provider": "anthropic", "model": "claude-haiku-4-5" }
     ],
     "targetLanguages": ["English", "Chinese (Simplified)", "French"],
-    "defaultAgent": "Pi default",
     "defaultTargetLanguage": "English",
+    "instructions": "",
     "prompt": "Transform the draft under these requirements:\\n{instructions}\\n\\nDRAFT START\\n{text}\\nDRAFT END"
   }
 }
@@ -137,9 +145,12 @@ Select **Open config** in the Rewrite dialog to launch this file with the deskto
 
 Customization rules:
 
-- Each agent needs a unique `name`. Set both `provider` and `model` to IDs recognized by Pi (`pi --list-models`), or leave both blank to use Pi's default.
-- `defaultAgent` must match an agent name, and `defaultTargetLanguage` must appear in `targetLanguages`.
-- `{text}` is required in `prompt`. `{instructions}` expands to the selected Translate/Tidy rules; `{source_language}` and `{target_language}` expand to the chosen language values.
+- `fileSearch.includeHidden` defaults to `false`. `skipDirectories` contains the generated/cache directory names omitted by both `fd` and Python indexing; edit the generated list to tune it.
+- `fileSearch.ignoreFiles` accepts extra gitignore-format files for `fd`. `useGlobalFzfOptions` inherits `FZF_DEFAULT_OPTS` and `FZF_DEFAULT_OPTS_FILE`; set it to `false` for app-only behavior, then place individual CLI arguments in `fzfOptions`.
+- Each agent is identified directly as `provider/model`; there is no separate name. Set both values to IDs recognized by Pi (`pi --list-models`), or leave both blank to offer Pi's default. The first array entry is the default agent.
+- `defaultTargetLanguage` must appear in `targetLanguages`.
+- Type extra standing rewrite directions in `instructions`; leave it as `""` when none are needed. `{instructions}` expands to the built-in Translate/Tidy rules followed by this value—no external prompt file is involved.
+- `{text}` is required in `prompt`. `{source_language}` and `{target_language}` expand to the chosen language values.
 - Keep the attachment-placeholder instruction when replacing the default prompt. Ghostwriter still validates placeholders locally, but clear model instructions avoid unnecessary repair requests.
 - JSON does not support comments. Use the field descriptions here rather than adding `//` or `#` lines to the file.
 
@@ -150,6 +161,8 @@ See [`docs/rewrite.md`](docs/rewrite.md) for protocol and privacy details.
 ## Layout
 
 Ghostwriter selects a side-by-side or stacked layout from both terminal width and aspect ratio. Its initial split always reserves space for the editor actions. Two mouse-draggable dividers resize the prompt independently: the outer divider changes editor width (or pane height when stacked), while the divider below the prompt changes its height. Pi sessions appear as concise rows in one scrollable target list; redundant details are not repeated below it. The prompt supports vertical and horizontal scrolling.
+
+The command palette deliberately omits Textual's SVG screenshot command. Theme selection is limited to six comfortable dark themes: Textual Dark, Nord, Gruvbox, Catppuccin Mocha, Tokyo Night, and Rosé Pine Moon.
 
 ## Architecture
 

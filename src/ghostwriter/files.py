@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import os
 import shlex
+import shutil
 import subprocess
 import sys
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import unquote, urlparse
@@ -12,7 +14,36 @@ IMAGE_SUFFIXES = {".bmp", ".gif", ".jpeg", ".jpg", ".png", ".webp"}
 MAX_PREVIEW_BYTES = 128 * 1024
 MAX_PREVIEW_LINES = 2_000
 MAX_INDEXED_FILES = 20_000
-SKIPPED_DIRECTORIES = {".git", ".venv", "__pycache__", "node_modules"}
+DEFAULT_SKIPPED_DIRECTORIES = (
+    ".bun",
+    ".cache",
+    ".git",
+    ".gradle",
+    ".mypy_cache",
+    ".next",
+    ".nox",
+    ".parcel-cache",
+    ".pnpm-store",
+    ".pytest_cache",
+    ".ruff_cache",
+    ".svelte-kit",
+    ".swiftpm",
+    ".tox",
+    ".turbo",
+    ".venv",
+    ".yarn",
+    "__pycache__",
+    "bower_components",
+    "build",
+    "coverage",
+    "DerivedData",
+    "dist",
+    "node_modules",
+    "Pods",
+    "target",
+    "vendor",
+    "venv",
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -98,17 +129,84 @@ return chosenPaths as text
         raise OSError("The native file picker could not be opened") from error
 
 
-def build_file_index(root: Path) -> list[Path]:
+def build_file_index(
+    root: Path,
+    *,
+    include_hidden: bool = False,
+    skipped_directories: Sequence[str] = DEFAULT_SKIPPED_DIRECTORIES,
+    ignore_files: Iterable[Path] = (),
+) -> list[Path]:
+    """Index project files with fd, falling back to a bounded Python walk."""
+    skipped = frozenset(skipped_directories)
+    if files := _build_fd_index(root, include_hidden, skipped, ignore_files):
+        return files
+    return _build_python_index(root, include_hidden, skipped)
+
+
+def _build_fd_index(
+    root: Path,
+    include_hidden: bool,
+    skipped_directories: frozenset[str],
+    ignore_files: Iterable[Path],
+) -> list[Path]:
+    fd = shutil.which("fd")
+    if fd is None:
+        return []
+
+    command = [
+        fd,
+        "--type=file",
+        "--color=never",
+        "--print0",
+        "--strip-cwd-prefix=always",
+        f"--max-results={MAX_INDEXED_FILES}",
+    ]
+    if include_hidden:
+        command.append("--hidden")
+    for directory in sorted(skipped_directories):
+        command.extend(("--exclude", directory))
+    for ignore_file in ignore_files:
+        path = ignore_file.expanduser().resolve()
+        if path.is_file():
+            command.extend(("--ignore-file", str(path)))
+    command.append(".")
+
+    try:
+        result = subprocess.run(
+            command,
+            cwd=root,
+            capture_output=True,
+            check=False,
+            timeout=5,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return []
+    if result.returncode:
+        return []
+    return [root / Path(os.fsdecode(item)) for item in result.stdout.split(b"\0") if item]
+
+
+def _build_python_index(
+    root: Path,
+    include_hidden: bool,
+    skipped_directories: frozenset[str],
+) -> list[Path]:
     files: list[Path] = []
     try:
         for directory, names, filenames in os.walk(root):
-            names[:] = sorted(name for name in names if name not in SKIPPED_DIRECTORIES)
+            names[:] = sorted(
+                name
+                for name in names
+                if name not in skipped_directories and (include_hidden or not name.startswith("."))
+            )
             for filename in sorted(filenames):
+                if not include_hidden and filename.startswith("."):
+                    continue
                 files.append(Path(directory) / filename)
                 if len(files) >= MAX_INDEXED_FILES:
                     return files
     except OSError:
-        return files
+        pass
     return files
 
 
@@ -118,6 +216,9 @@ def find_file_completions(
     indexed_files: list[Path],
     *,
     limit: int = 12,
+    include_hidden: bool = False,
+    fzf_options: Sequence[str] = (),
+    use_global_fzf_options: bool = True,
 ) -> list[FileCompletion]:
     if query.startswith(("/", "~")):
         expanded = Path(query).expanduser()
@@ -127,7 +228,12 @@ def find_file_completions(
             children = sorted(parent.iterdir(), key=lambda path: (not path.is_dir(), path.name.lower()))
         except OSError:
             return []
-        matches = [child for child in children if child.name.lower().startswith(prefix)]
+        matches = [
+            child
+            for child in children
+            if (include_hidden or not child.name.startswith("."))
+            and child.name.lower().startswith(prefix)
+        ]
         return [
             FileCompletion(
                 child,
@@ -137,22 +243,35 @@ def find_file_completions(
             for child in matches[:limit]
         ]
 
-    needle = query.removeprefix("./").lower()
-    ranked: list[tuple[int, str, Path]] = []
+    relative_paths: list[tuple[str, Path]] = []
     for path in indexed_files:
         try:
-            relative = path.relative_to(root).as_posix()
+            relative_paths.append((path.relative_to(root).as_posix(), path))
         except ValueError:
             continue
+
+    needle = query.removeprefix("./")
+    fuzzy_matches = _rank_with_fzf(
+        needle,
+        relative_paths,
+        fzf_options=fzf_options,
+        use_global_options=use_global_fzf_options,
+    )
+    if fuzzy_matches is not None:
+        return [FileCompletion(path, relative) for relative, path in fuzzy_matches[:limit]]
+
+    lowered_needle = needle.lower()
+    ranked: list[tuple[int, str, Path]] = []
+    for relative, path in relative_paths:
         name = path.name.lower()
         lowered = relative.lower()
-        if name.startswith(needle):
+        if name.startswith(lowered_needle):
             score = 0
-        elif lowered.startswith(needle):
+        elif lowered.startswith(lowered_needle):
             score = 1
-        elif needle in name:
+        elif lowered_needle in name:
             score = 2
-        elif needle in lowered:
+        elif lowered_needle in lowered:
             score = 3
         else:
             continue
@@ -160,6 +279,59 @@ def find_file_completions(
 
     ranked.sort(key=lambda item: (item[0], len(item[1]), item[1].lower()))
     return [FileCompletion(path, relative) for _, relative, path in ranked[:limit]]
+
+
+def _rank_with_fzf(
+    query: str,
+    relative_paths: Sequence[tuple[str, Path]],
+    *,
+    fzf_options: Sequence[str],
+    use_global_options: bool,
+) -> list[tuple[str, Path]] | None:
+    fzf = shutil.which("fzf")
+    if fzf is None:
+        return None
+
+    lookup = {relative: path for relative, path in relative_paths}
+    source = b"\0".join(os.fsencode(relative) for relative in lookup)
+    if source:
+        source += b"\0"
+    command = [
+        fzf,
+        *fzf_options,
+        f"--filter={query}",
+        "--scheme=path",
+        "--tiebreak=pathname,index",
+        "--read0",
+        "--print0",
+        "--no-multi-line",
+    ]
+    environment = os.environ.copy()
+    if not use_global_options:
+        environment.pop("FZF_DEFAULT_OPTS", None)
+        environment.pop("FZF_DEFAULT_OPTS_FILE", None)
+    try:
+        result = subprocess.run(
+            command,
+            input=source,
+            capture_output=True,
+            check=False,
+            env=environment,
+            timeout=2,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    if result.returncode not in {0, 1}:
+        return None
+
+    matches: list[tuple[str, Path]] = []
+    for raw_match in result.stdout.split(b"\0"):
+        if not raw_match:
+            continue
+        relative = os.fsdecode(raw_match)
+        if path := lookup.get(relative):
+            matches.append((relative, path))
+    return matches
 
 
 def read_text_preview(path: Path) -> str | None:

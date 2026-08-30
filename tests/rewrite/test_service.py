@@ -60,7 +60,8 @@ async def test_custom_prompt_receives_language_and_protected_text() -> None:
         draft,
         RewriteOptions(
             target_language="English",
-            prompt="Translate into {target_language}:\n{text}",
+            instructions="Use a formal tone.",
+            prompt="Translate into {target_language}:\n{instructions}\n{text}",
         ),
     )
     fake_rpc = FakeRpc()
@@ -70,4 +71,5 @@ async def test_custom_prompt_receives_language_and_protected_text() -> None:
     await session.close()
 
     assert fake_rpc.prompts[0].startswith("Translate into English:")
+    assert "Use a formal tone." in fake_rpc.prompts[0]
     assert attachment.editor_token not in fake_rpc.prompts[0]

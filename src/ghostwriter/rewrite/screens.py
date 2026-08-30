@@ -45,10 +45,10 @@ class RewriteConfigScreen(ModalScreen[RewriteOptions | None]):
             if self.defaults.target_language in self.config.target_languages
             else self.config.default_target_language
         )
-        agent_name = (
+        agent_label = (
             self.defaults.agent
-            if self.defaults.agent in {agent.name for agent in self.config.agents}
-            else self.config.default_agent
+            if self.defaults.agent in {agent.label for agent in self.config.agents}
+            else self.config.default_agent.label
         )
         with VerticalScroll(id="rewrite-config-dialog"):
             yield Label("TRANSLATE / TIDY", classes="dialog-title")
@@ -82,8 +82,8 @@ class RewriteConfigScreen(ModalScreen[RewriteOptions | None]):
             )
             yield Label("Rewrite agent")
             yield Select(
-                [(agent.name, agent.name) for agent in self.config.agents],
-                value=agent_name,
+                [(agent.label, agent.label) for agent in self.config.agents],
+                value=agent_label,
                 allow_blank=False,
                 id="rewrite-agent",
             )
@@ -133,8 +133,10 @@ class RewriteConfigScreen(ModalScreen[RewriteOptions | None]):
         target_value = self.query_one("#rewrite-target", Select).value
         agent_value = self.query_one("#rewrite-agent", Select).value
         target_language = "" if target_value is Select.NULL else str(target_value)
-        agent_name = self.config.default_agent if agent_value is Select.NULL else str(agent_value)
-        agent = self.config.agent(agent_name)
+        agent_label = (
+            self.config.default_agent.label if agent_value is Select.NULL else str(agent_value)
+        )
+        agent = self.config.agent(agent_label)
         options = RewriteOptions(
             translate=self.query_one("#rewrite-translate", Checkbox).value,
             tidy=self.query_one("#rewrite-tidy", Checkbox).value,
@@ -142,7 +144,8 @@ class RewriteConfigScreen(ModalScreen[RewriteOptions | None]):
             target_language=target_language,
             provider=agent.provider,
             model=agent.model,
-            agent=agent.name,
+            agent=agent.label,
+            instructions=self.config.instructions,
             prompt=self.config.prompt,
         )
         try:
@@ -179,14 +182,16 @@ class RewriteConfigScreen(ModalScreen[RewriteOptions | None]):
         current_agent = None if agent.value is Select.NULL else str(agent.value)
         self.config = config
         target.set_options((language, language) for language in config.target_languages)
-        agent.set_options((item.name, item.name) for item in config.agents)
+        agent.set_options((item.label, item.label) for item in config.agents)
         target.value = (
             current_target
             if current_target in config.target_languages
             else config.default_target_language
         )
-        agent_names = {item.name for item in config.agents}
-        agent.value = current_agent if current_agent in agent_names else config.default_agent
+        agent_labels = {item.label for item in config.agents}
+        agent.value = (
+            current_agent if current_agent in agent_labels else config.default_agent.label
+        )
         self.notify("Config reloaded")
 
     @on(Button.Pressed, "#rewrite-cancel")

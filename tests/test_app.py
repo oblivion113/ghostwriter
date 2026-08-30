@@ -30,6 +30,15 @@ async def test_adding_file_inserts_marker_at_cursor(tmp_path: Path) -> None:
         attachment = app.draft.attachments[0]
         assert attachment.editor_token in editor.text
         assert editor.text.startswith("before")
+        rendered_line = editor.get_line(0)
+        attachment_spans = [
+            span
+            for span in rendered_line.spans
+            if rendered_line.plain[span.start : span.end] == attachment.editor_token
+        ]
+        assert attachment_spans
+        assert attachment_spans[0].style.bold
+        assert attachment_spans[0].style.color is not None
 
 
 @pytest.mark.asyncio
@@ -179,6 +188,33 @@ async def test_at_completion_attaches_project_file_with_compact_marker(tmp_path:
         assert editor.text == "Review @context.md "
         assert app.draft.attachments[0].source == source.resolve()
         assert app.query_one("#attachments").row_count == 1
+
+
+def test_command_palette_omits_screenshot_and_only_offers_comfortable_themes() -> None:
+    app = GhostwriterApp()
+
+    command_titles = {
+        command.title for command in app.get_system_commands(app.get_default_screen())
+    }
+
+    assert "Screenshot" not in command_titles
+    assert "Theme" in command_titles
+    assert set(app.available_themes) == set(app.COMFORTABLE_THEMES)
+    assert all(theme.dark for theme in app.available_themes.values())
+
+
+@pytest.mark.asyncio
+async def test_prompt_text_stays_white_across_themes(tmp_path: Path) -> None:
+    app = GhostwriterApp()
+    app.draft = Draft(text="Plain text")
+    app.store = DraftStore(tmp_path / "draft.json")
+
+    async with app.run_test(size=(120, 40)) as pilot:
+        editor = app.query_one("#prompt-editor")
+        for theme in app.COMFORTABLE_THEMES:
+            app.theme = theme
+            await pilot.pause()
+            assert editor.styles.color.hex == "#FFFFFF"
 
 
 @pytest.mark.asyncio

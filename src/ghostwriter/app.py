@@ -1,15 +1,18 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Iterable
 from pathlib import Path
 from typing import ClassVar
 
+from rich.text import Text
 from textual import events, on
-from textual.app import App, ComposeResult
+from textual.app import App, ComposeResult, SystemCommand
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.events import Resize
 from textual.message import Message
+from textual.screen import Screen
 from textual.widgets import (
     Button,
     DataTable,
@@ -93,6 +96,22 @@ class DragHandle(Static):
 
 
 class PromptTextArea(TextArea):
+    COMPONENT_CLASSES = TextArea.COMPONENT_CLASSES | {"prompt-attachment"}
+
+    def get_line(self, line_index: int) -> Text:
+        line = super().get_line(line_index)
+        app = self.app
+        if not isinstance(app, GhostwriterApp):
+            return line
+        attachment_style = self.get_component_rich_style("prompt-attachment")
+        for attachment in app.draft.attachments:
+            token = attachment.editor_token
+            start = 0
+            while (index := line.plain.find(token, start)) >= 0:
+                line.stylize(attachment_style, index, index + len(token))
+                start = index + len(token)
+        return line
+
     async def _on_paste(self, event: events.Paste) -> None:
         app = self.app
         if isinstance(app, GhostwriterApp) and app._attach_pasted_paths(event.text):
@@ -114,6 +133,16 @@ class GhostwriterApp(App[None]):
     TITLE = "Ghostwriter"
     SUB_TITLE = "Compose here. Submit in Pi."
     CSS_PATH = "ghostwriter.tcss"
+    COMFORTABLE_THEMES = frozenset(
+        {
+            "textual-dark",
+            "nord",
+            "gruvbox",
+            "catppuccin-mocha",
+            "tokyo-night",
+            "rose-pine-moon",
+        }
+    )
 
     BINDINGS: ClassVar[list[Binding]] = [
         Binding("ctrl+enter", "inject", "Inject into Pi", priority=True),
@@ -126,6 +155,10 @@ class GhostwriterApp(App[None]):
 
     def __init__(self, initial_paths: list[Path] | None = None) -> None:
         super().__init__()
+        if self.theme not in self.COMFORTABLE_THEMES:
+            self.theme = "textual-dark"
+        for theme_name in set(self.available_themes) - self.COMFORTABLE_THEMES:
+            self.unregister_theme(theme_name)
         self.store = DraftStore()
         self.config_store = ConfigStore()
         self.image_cache = ImageCache()
@@ -137,12 +170,13 @@ class GhostwriterApp(App[None]):
         self.selected_attachment_id: str | None = None
         self.initial_paths = initial_paths or []
         rewrite_config = self.config.rewrite
-        default_agent = rewrite_config.agent(rewrite_config.default_agent)
+        default_agent = rewrite_config.default_agent
         self.rewrite_defaults = RewriteOptions(
             target_language=rewrite_config.default_target_language,
             provider=default_agent.provider,
             model=default_agent.model,
-            agent=default_agent.name,
+            agent=default_agent.label,
+            instructions=rewrite_config.instructions,
             prompt=rewrite_config.prompt,
         )
         self.rewrite_rpc = PiRpcSession()
@@ -153,6 +187,14 @@ class GhostwriterApp(App[None]):
         self._horizontal_split = 0.74
         self._vertical_split = 0.52
         self._prompt_split = 0.8
+
+    def get_system_commands(self, screen: Screen) -> Iterable[SystemCommand]:
+        """Keep Textual's useful commands, excluding SVG screenshot export."""
+        yield from (
+            command
+            for command in super().get_system_commands(screen)
+            if command.title != "Screenshot"
+        )
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)
@@ -293,13 +335,16 @@ class GhostwriterApp(App[None]):
         open_config_file(self.config_store.path)
 
     def _reload_config(self) -> RewriteConfig:
-        previous = self.config.rewrite
+        previous_rewrite = self.config.rewrite
+        previous_file_search = self.config.file_search
         config = self.config_store.reload()
         self.config = config
         rewrite = config.rewrite
         current = self.rewrite_defaults
-        agent_names = {agent.name for agent in rewrite.agents}
-        agent = rewrite.agent(current.agent if current.agent in agent_names else rewrite.default_agent)
+        agent_labels = {agent.label for agent in rewrite.agents}
+        agent = rewrite.agent(
+            current.agent if current.agent in agent_labels else rewrite.default_agent.label
+        )
         target_language = (
             current.target_language
             if current.target_language in rewrite.target_languages
@@ -312,10 +357,13 @@ class GhostwriterApp(App[None]):
             target_language=target_language,
             provider=agent.provider,
             model=agent.model,
-            agent=agent.name,
+            agent=agent.label,
+            instructions=rewrite.instructions,
             prompt=rewrite.prompt,
         )
-        if rewrite.keep_rpc_warm and not previous.keep_rpc_warm and not self.is_headless:
+        if config.file_search != previous_file_search:
+            self._file_index_root = None
+        if rewrite.keep_rpc_warm and not previous_rewrite.keep_rpc_warm and not self.is_headless:
             self.run_worker(self._warm_rewrite_rpc(), exclusive=True, group="rewrite-warmup")
         return rewrite
 
@@ -422,10 +470,23 @@ class GhostwriterApp(App[None]):
             return
 
         root = self._project_root()
+        search = self.config.file_search
         if self._file_index_root != root:
             self._file_index_root = root
-            self._file_index = build_file_index(root)
-        candidates = find_file_completions(root, query, self._file_index)
+            self._file_index = build_file_index(
+                root,
+                include_hidden=search.include_hidden,
+                skipped_directories=search.skipped_directories,
+                ignore_files=search.ignore_files,
+            )
+        candidates = find_file_completions(
+            root,
+            query,
+            self._file_index,
+            include_hidden=search.include_hidden,
+            fzf_options=search.fzf_options,
+            use_global_fzf_options=search.use_global_fzf_options,
+        )
         if not candidates:
             self._hide_file_completions()
             return

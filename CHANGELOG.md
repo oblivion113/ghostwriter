@@ -6,9 +6,11 @@ All notable changes to Ghostwriter will be documented here. The project follows 
 
 - Reserved visible space for prompt actions in compact and stacked layouts.
 - Consolidated Pi target identity into one concise scrollable list.
-- Added unified JSON configuration for rewrite agents, languages, RPC warm-up, and custom prompts, with default-editor and live-reload controls.
+- Added unified JSON configuration for provider/model rewrite agents, languages, extra instructions, RPC warm-up, and custom prompts, with default-editor and live-reload controls.
 - Kept one isolated rewrite RPC process warm across workflows while resetting conversation state and cleaning it up on exit.
 - Prevented the default rewrite prompt from adding headings to short, single-section drafts.
+- Added optional `fd` indexing and `fzf` fuzzy ranking for `@` completion, with configurable exclusions and a hidden/cache-free Python fallback.
+- Removed SVG screenshot export, limited themes to comfortable dark palettes, kept prompt prose white, and highlighted attachment markers in the editor.
 
 ## 0.2.0 - 2026-08-29
 
