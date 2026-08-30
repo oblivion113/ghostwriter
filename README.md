@@ -160,7 +160,7 @@ See [`docs/rewrite.md`](docs/rewrite.md) for protocol and privacy details.
 
 ## Layout
 
-Ghostwriter selects a side-by-side or stacked layout from both terminal width and aspect ratio. Its initial split always reserves space for the editor actions. Two mouse-draggable dividers resize the prompt independently: the outer divider changes editor width (or pane height when stacked), while the divider below the prompt changes its height. Pi sessions appear as concise rows in one scrollable target list; redundant details are not repeated below it. The prompt supports vertical and horizontal scrolling.
+Ghostwriter selects a side-by-side or stacked layout from both terminal width and aspect ratio. Its initial split always reserves space for the editor actions. Two mouse-draggable dividers resize the prompt independently: the outer divider changes editor width (or pane height when stacked), while the divider below the prompt changes its height. The current Pi session appears in a compact dropdown, which expands only when choosing another target. When no session is available, the control shows a disabled **No active Pi session** state rather than a selectable option. Prompt text soft-wraps to the available width and scrolls vertically without a horizontal scrollbar.
 
 The command palette deliberately omits Textual's SVG screenshot command. Theme selection is limited to six comfortable dark themes: Textual Dark, Nord, Gruvbox, Catppuccin Mocha, Tokyo Night, and Rosé Pine Moon.
 

@@ -20,6 +20,7 @@ from textual.widgets import (
     Header,
     Label,
     OptionList,
+    Select,
     Static,
     TextArea,
 )
@@ -112,26 +113,24 @@ class PromptTextArea(TextArea):
                 start = index + len(token)
         return line
 
-    async def _on_paste(self, event: events.Paste) -> None:
+    def _on_paste(self, event: events.Paste) -> None:
         app = self.app
         if isinstance(app, GhostwriterApp) and app._attach_pasted_paths(event.text):
             event.stop()
             event.prevent_default()
-            return
-        await super()._on_paste(event)
 
-    async def _on_key(self, event: events.Key) -> None:
+    def _on_key(self, event: events.Key) -> None:
         app = self.app
         if isinstance(app, GhostwriterApp) and app._handle_completion_key(event.key):
             event.stop()
             event.prevent_default()
-            return
-        await super()._on_key(event)
 
 
 class GhostwriterApp(App[None]):
     TITLE = "Ghostwriter"
     SUB_TITLE = "Compose here. Submit in Pi."
+    NO_TARGET_ID = "__no-active-pi-session__"
+    NO_TARGET_LABEL = "No active Pi session"
     CSS_PATH = "ghostwriter.tcss"
     COMFORTABLE_THEMES = frozenset(
         {
@@ -205,7 +204,7 @@ class GhostwriterApp(App[None]):
                     yield PromptTextArea(
                         self.draft.text,
                         id="prompt-editor",
-                        soft_wrap=False,
+                        soft_wrap=True,
                         show_line_numbers=False,
                         placeholder="Compose here, drag files, or type @ to attach…",
                     )
@@ -248,11 +247,13 @@ class GhostwriterApp(App[None]):
             with VerticalScroll(id="side-pane"):
                 yield Label("PI TARGET", classes="section-title")
                 with Horizontal(id="target-row"):
-                    yield OptionList(
-                        Option("No Pi bridge found", id="no-target"),
+                    yield Select(
+                        [(self.NO_TARGET_LABEL, self.NO_TARGET_ID)],
+                        value=self.NO_TARGET_ID,
+                        allow_blank=False,
                         id="target",
-                        markup=False,
                         compact=True,
+                        disabled=True,
                     )
                     yield Button(
                         "↻",
@@ -572,7 +573,7 @@ class GhostwriterApp(App[None]):
         target = self._selected_target()
         if target is None:
             self.notify(
-                "No Pi bridge is available. Start Pi with the Ghostwriter extension loaded.",
+                "No active Pi session is available. Start Pi with the Ghostwriter extension loaded.",
                 severity="warning",
             )
             return
@@ -684,25 +685,28 @@ class GhostwriterApp(App[None]):
 
     def action_refresh_targets(self) -> None:
         self._file_index_root = None
-        target_list = self.query_one("#target", OptionList)
+        target_select = self.query_one("#target", Select)
         previous = self.selected_target_id
         found = self.pi.discover_targets()
         self.targets = {target.selection_id: target for target in found}
-        target_list.clear_options()
-        if self.targets:
-            target_list.add_options(
-                Option(target.summary, id=selection_id)
+        options = (
+            [
+                (target.summary, selection_id)
                 for selection_id, target in self.targets.items()
-            )
+            ]
+            if self.targets
+            else [(self.NO_TARGET_LABEL, self.NO_TARGET_ID)]
+        )
+        target_select.set_options(options)
+        if self.targets:
             self.selected_target_id = (
                 previous if previous in self.targets else next(iter(self.targets))
             )
-            target_list.highlighted = list(self.targets).index(self.selected_target_id)
-            target_list.disabled = False
+            target_select.disabled = False
+            target_select.value = self.selected_target_id
         else:
-            target_list.add_option(Option("No Pi bridge found", id="no-target"))
-            target_list.highlighted = 0
-            target_list.disabled = True
+            target_select.value = self.NO_TARGET_ID
+            target_select.disabled = True
             self.selected_target_id = None
         count = len(self.targets)
         self._set_status(f"Found {count} Pi target{'s' if count != 1 else ''}")
@@ -741,10 +745,10 @@ class GhostwriterApp(App[None]):
     def file_completion_selected(self, event: OptionList.OptionSelected) -> None:
         self._accept_file_completion(event.option_index)
 
-    @on(OptionList.OptionHighlighted, "#target")
-    def target_highlighted(self, event: OptionList.OptionHighlighted) -> None:
-        option_id = event.option.id
-        self.selected_target_id = str(option_id) if option_id in self.targets else None
+    @on(Select.Changed, "#target")
+    def target_changed(self, event: Select.Changed) -> None:
+        target_id = None if event.value is Select.NULL else str(event.value)
+        self.selected_target_id = target_id if target_id in self.targets else None
         self._file_index_root = None
 
     @on(DataTable.RowHighlighted, "#attachments")

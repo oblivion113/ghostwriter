@@ -5,7 +5,8 @@ from pathlib import Path
 import pytest
 from textual import events
 from textual.containers import VerticalScroll
-from textual.widgets import OptionList
+from textual.widgets import Select
+from textual.widgets._select import InvalidSelectValueError
 
 from ghostwriter.app import GhostwriterApp
 from ghostwriter.model import Draft
@@ -60,6 +61,19 @@ async def test_pasting_file_path_into_prompt_creates_attachment(tmp_path: Path) 
         assert attachment.kind == "file"
         assert attachment.editor_token in editor.text
         assert str(source) not in editor.text
+
+
+@pytest.mark.asyncio
+async def test_plain_paste_is_inserted_once(tmp_path: Path) -> None:
+    app = GhostwriterApp()
+    app.draft = Draft(text="")
+    app.store = DraftStore(tmp_path / "draft.json")
+
+    async with app.run_test(size=(120, 40)) as pilot:
+        app.post_message(events.Paste("Audio transcription"))
+        await pilot.pause()
+
+        assert app.query_one("#prompt-editor").text == "Audio transcription"
 
 
 @pytest.mark.asyncio
@@ -122,30 +136,56 @@ async def test_code_attachment_has_raw_text_preview(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
-async def test_target_sessions_are_concise_in_one_scrollable_list(tmp_path: Path) -> None:
+async def test_target_sessions_use_a_collapsed_select(tmp_path: Path) -> None:
     app = GhostwriterApp()
     app.draft = Draft(text="")
     app.store = DraftStore(tmp_path / "draft.json")
-    target = PiTarget(
-        pid=42,
-        session_id="abcdef123456",
-        session_name="Refactor",
-        cwd=tmp_path / "ghostwriter",
-        socket_path=tmp_path / "pi.sock",
-        provider="anthropic",
-        model_id="claude-sonnet",
-        thinking_level="high",
-    )
-    app.pi.discover_targets = lambda: [target]  # type: ignore[method-assign]
+    targets = [
+        PiTarget(
+            pid=pid,
+            session_id=f"abcdef{pid}",
+            session_name=name,
+            cwd=tmp_path / name.lower(),
+            socket_path=tmp_path / f"{pid}.sock",
+            provider="anthropic",
+            model_id="claude-sonnet",
+            thinking_level="high",
+        )
+        for pid, name in ((42, "Refactor"), (43, "Review"))
+    ]
+    app.pi.discover_targets = lambda: targets  # type: ignore[method-assign]
 
     async with app.run_test(size=(120, 40)) as pilot:
         await pilot.pause()
-        target_list = app.query_one("#target", OptionList)
+        target_select = app.query_one("#target", Select)
 
-        assert target_list.option_count == 1
-        assert app._selected_target() == target
-        assert "Refactor" in str(target_list.get_option_at_index(0).prompt)
-        assert not app.query("#target-details")
+        assert target_select.value == targets[0].selection_id
+        assert not target_select.expanded
+        assert app._selected_target() == targets[0]
+        with pytest.raises(InvalidSelectValueError):
+            target_select.value = Select.NULL
+
+        target_select.value = targets[1].selection_id
+        await pilot.pause()
+        assert app._selected_target() == targets[1]
+
+
+@pytest.mark.asyncio
+async def test_target_select_has_a_disabled_empty_state(tmp_path: Path) -> None:
+    app = GhostwriterApp()
+    app.draft = Draft(text="")
+    app.store = DraftStore(tmp_path / "draft.json")
+    app.pi.discover_targets = list  # type: ignore[method-assign]
+
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+        target_select = app.query_one("#target", Select)
+
+        assert target_select.disabled
+        assert target_select.value == app.NO_TARGET_ID
+        assert app._selected_target() is None
+        with pytest.raises(InvalidSelectValueError):
+            target_select.value = Select.NULL
 
 
 @pytest.mark.asyncio
@@ -201,6 +241,20 @@ def test_command_palette_omits_screenshot_and_only_offers_comfortable_themes() -
     assert "Theme" in command_titles
     assert set(app.available_themes) == set(app.COMFORTABLE_THEMES)
     assert all(theme.dark for theme in app.available_themes.values())
+
+
+@pytest.mark.asyncio
+async def test_prompt_soft_wraps_without_horizontal_scrolling(tmp_path: Path) -> None:
+    app = GhostwriterApp()
+    app.draft = Draft(text="word " * 100)
+    app.store = DraftStore(tmp_path / "draft.json")
+
+    async with app.run_test(size=(80, 30)):
+        editor = app.query_one("#prompt-editor")
+
+        assert editor.soft_wrap
+        assert editor.styles.overflow_x == "hidden"
+        assert editor.max_scroll_x == 0
 
 
 @pytest.mark.asyncio

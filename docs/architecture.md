@@ -81,16 +81,16 @@ No attachment path, filename, or content is sent to the rewrite model.
 
 Textual owns terminal rendering and input. Important custom behavior includes:
 
-- `PromptTextArea`: intercepts bracketed paste and Tab completion, keeps prose white across themes, and styles active attachment markers without changing their text;
+- `PromptTextArea`: intercepts bracketed paste and Tab completion without re-running Textual's default handlers, soft-wraps prose, keeps it white across themes, and styles active attachment markers without changing their text;
 - `DragHandle`: captures mouse events directly for independent width and height resizing;
-- `OptionList`: presents complete, concise Pi target identity in one scrollable box;
+- `Select`: shows only the current Pi target until its dropdown is opened and uses a disabled sentinel only when no target exists;
 - `VerticalScroll`: keeps the side pane reachable in constrained layouts;
 - thread worker: runs blocking native file pickers without freezing Textual;
 - curated theme registration: exposes only comfortable dark choices in Textual's theme picker;
 - filtered system commands: removes Textual's SVG screenshot export from the command palette;
 - async workers: perform socket injection and Pi RPC communication.
 
-The app switches between side-by-side and stacked layouts using terminal width and aspect ratio. TextArea supplies clipboard handling, history, selection, and both scroll axes.
+The app switches between side-by-side and stacked layouts using terminal width and aspect ratio. TextArea supplies clipboard handling, history, selection, soft wrapping, and vertical scrolling.
 
 ## Persistence and runtime files
 

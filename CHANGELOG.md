@@ -10,6 +10,8 @@ All notable changes to Ghostwriter will be documented here. The project follows 
 - Kept one isolated rewrite RPC process warm across workflows while resetting conversation state and cleaning it up on exit.
 - Prevented the default rewrite prompt from adding headings to short, single-section drafts.
 - Added optional `fd` indexing and `fzf` fuzzy ranking for `@` completion, with configurable exclusions and a hidden/cache-free Python fallback.
+- Fixed duplicate terminal paste and speech-recognition insertion caused by re-running Textual's default handlers.
+- Soft-wrapped prompt text without horizontal scrolling and replaced the expanded Pi target list with a dropdown that has no selectable empty entry.
 - Removed SVG screenshot export, limited themes to comfortable dark palettes, kept prompt prose white, and highlighted attachment markers in the editor.
 
 ## 0.2.0 - 2026-08-29
