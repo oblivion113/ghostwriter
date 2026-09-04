@@ -88,6 +88,19 @@ async def test_plain_paste_is_inserted_once(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
+async def test_unsaved_prompt_is_persisted_on_unmount(tmp_path: Path) -> None:
+    store = DraftStore(tmp_path / "draft.json")
+    app = GhostwriterApp()
+    app.draft = Draft(text="before")
+    app.store = store
+
+    async with app.run_test(size=(120, 40)):
+        app.query_one("#prompt-editor").load_text("edited without saving")
+
+    assert store.load().text == "edited without saving"
+
+
+@pytest.mark.asyncio
 async def test_deleting_last_marker_removes_unreferenced_attachment(tmp_path: Path) -> None:
     source = tmp_path / "context.md"
     source.write_text("context", encoding="utf-8")

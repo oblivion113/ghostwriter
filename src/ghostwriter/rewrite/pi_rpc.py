@@ -143,7 +143,8 @@ class PiRpcSession:
                     if pending is not None and not pending.done():
                         pending.set_result(message)
                         continue
-                await self._events.put(message)
+                if message.get("type") in {"message_end", "agent_settled"}:
+                    await self._events.put(message)
         except asyncio.CancelledError:
             raise
         except (OSError, ValueError, PiRpcError) as error:

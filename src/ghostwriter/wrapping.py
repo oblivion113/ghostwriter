@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import io
 import unicodedata
 
 from textual._wrap import compute_wrap_offsets
@@ -15,12 +16,14 @@ def natural_wrap_offsets(text: str, width: int, tab_size: int) -> list[int]:
     if not width or len(text) < 2:
         return compute_wrap_offsets(text, width, tab_size)
 
-    virtual: list[str] = []
-    boundary_to_source = [0]
+    if not any(_is_wide_character(character) for character in text):
+        return compute_wrap_offsets(text, width, tab_size)
+
+    virtual = io.StringIO()
     previous = text[0]
-    virtual.append(previous)
-    boundary_to_source.append(1)
-    for source_index, character in enumerate(text[1:], 1):
+    virtual.write(previous)
+    inserted_separator = False
+    for character in text[1:]:
         if (
             not previous.isspace()
             and not character.isspace()
@@ -28,22 +31,26 @@ def natural_wrap_offsets(text: str, width: int, tab_size: int) -> list[int]:
         ):
             # File Separator is regex whitespace with zero terminal-cell width. It exposes
             # a line-break opportunity to Textual without affecting measured width.
-            virtual.append("\x1c")
-            boundary_to_source.append(source_index)
-        virtual.append(character)
-        boundary_to_source.append(source_index + 1)
+            virtual.write("\x1c")
+            inserted_separator = True
+        virtual.write(character)
         previous = character
 
-    if len(virtual) == len(text):
+    if not inserted_separator:
         return compute_wrap_offsets(text, width, tab_size)
 
+    virtual_text = virtual.getvalue()
     source_offsets: list[int] = []
-    for offset in compute_wrap_offsets("".join(virtual), width, tab_size):
-        source_offset = boundary_to_source[offset]
+    previous_offset = 0
+    separator_count = 0
+    for offset in compute_wrap_offsets(virtual_text, width, tab_size):
+        separator_count += virtual_text.count("\x1c", previous_offset, offset)
+        source_offset = offset - separator_count
         if 0 < source_offset < len(text) and (
             not source_offsets or source_offsets[-1] != source_offset
         ):
             source_offsets.append(source_offset)
+        previous_offset = offset
     return source_offsets
 
 

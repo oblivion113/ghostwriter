@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import heapq
 import os
 import shlex
 import shutil
@@ -135,7 +136,7 @@ def build_file_index(
     include_hidden: bool = False,
     skipped_directories: Sequence[str] = DEFAULT_SKIPPED_DIRECTORIES,
     ignore_files: Iterable[Path] = (),
-) -> list[Path]:
+) -> list[str]:
     """Index project files with fd, falling back to a bounded Python walk."""
     skipped = frozenset(skipped_directories)
     if files := _build_fd_index(root, include_hidden, skipped, ignore_files):
@@ -148,7 +149,7 @@ def _build_fd_index(
     include_hidden: bool,
     skipped_directories: frozenset[str],
     ignore_files: Iterable[Path],
-) -> list[Path]:
+) -> list[str]:
     fd = shutil.which("fd")
     if fd is None:
         return []
@@ -183,15 +184,15 @@ def _build_fd_index(
         return []
     if result.returncode:
         return []
-    return [root / Path(os.fsdecode(item)) for item in result.stdout.split(b"\0") if item]
+    return [os.fsdecode(item) for item in result.stdout.split(b"\0") if item]
 
 
 def _build_python_index(
     root: Path,
     include_hidden: bool,
     skipped_directories: frozenset[str],
-) -> list[Path]:
-    files: list[Path] = []
+) -> list[str]:
+    files: list[str] = []
     try:
         for directory, names, filenames in os.walk(root):
             names[:] = sorted(
@@ -199,10 +200,11 @@ def _build_python_index(
                 for name in names
                 if name not in skipped_directories and (include_hidden or not name.startswith("."))
             )
+            relative_directory = Path(directory).relative_to(root)
             for filename in sorted(filenames):
                 if not include_hidden and filename.startswith("."):
                     continue
-                files.append(Path(directory) / filename)
+                files.append((relative_directory / filename).as_posix())
                 if len(files) >= MAX_INDEXED_FILES:
                     return files
     except OSError:
@@ -213,7 +215,7 @@ def _build_python_index(
 def find_file_completions(
     root: Path,
     query: str,
-    indexed_files: list[Path],
+    indexed_files: Sequence[str],
     *,
     limit: int = 12,
     include_hidden: bool = False,
@@ -243,57 +245,56 @@ def find_file_completions(
             for child in matches[:limit]
         ]
 
-    relative_paths: list[tuple[str, Path]] = []
-    for path in indexed_files:
-        try:
-            relative_paths.append((path.relative_to(root).as_posix(), path))
-        except ValueError:
-            continue
-
     needle = query.removeprefix("./")
     fuzzy_matches = _rank_with_fzf(
         needle,
-        relative_paths,
+        indexed_files,
         fzf_options=fzf_options,
         use_global_options=use_global_fzf_options,
+        limit=limit,
     )
     if fuzzy_matches is not None:
-        return [FileCompletion(path, relative) for relative, path in fuzzy_matches[:limit]]
+        return [FileCompletion(root / relative, relative) for relative in fuzzy_matches]
 
     lowered_needle = needle.lower()
-    ranked: list[tuple[int, str, Path]] = []
-    for relative, path in relative_paths:
-        name = path.name.lower()
-        lowered = relative.lower()
-        if name.startswith(lowered_needle):
-            score = 0
-        elif lowered.startswith(lowered_needle):
-            score = 1
-        elif lowered_needle in name:
-            score = 2
-        elif lowered_needle in lowered:
-            score = 3
-        else:
-            continue
-        ranked.append((score, relative, path))
 
-    ranked.sort(key=lambda item: (item[0], len(item[1]), item[1].lower()))
-    return [FileCompletion(path, relative) for _, relative, path in ranked[:limit]]
+    def ranked_candidates() -> Iterable[tuple[int, str]]:
+        for relative in indexed_files:
+            name = relative.rsplit("/", 1)[-1].lower()
+            lowered = relative.lower()
+            if name.startswith(lowered_needle):
+                score = 0
+            elif lowered.startswith(lowered_needle):
+                score = 1
+            elif lowered_needle in name:
+                score = 2
+            elif lowered_needle in lowered:
+                score = 3
+            else:
+                continue
+            yield score, relative
+
+    ranked = heapq.nsmallest(
+        limit,
+        ranked_candidates(),
+        key=lambda item: (item[0], len(item[1]), item[1].lower()),
+    )
+    return [FileCompletion(root / relative, relative) for _, relative in ranked]
 
 
 def _rank_with_fzf(
     query: str,
-    relative_paths: Sequence[tuple[str, Path]],
+    relative_paths: Sequence[str],
     *,
     fzf_options: Sequence[str],
     use_global_options: bool,
-) -> list[tuple[str, Path]] | None:
+    limit: int,
+) -> list[str] | None:
     fzf = shutil.which("fzf")
     if fzf is None:
         return None
 
-    lookup = {relative: path for relative, path in relative_paths}
-    source = b"\0".join(os.fsencode(relative) for relative in lookup)
+    source = b"\0".join(os.fsencode(relative) for relative in relative_paths)
     if source:
         source += b"\0"
     command = [
@@ -324,13 +325,19 @@ def _rank_with_fzf(
     if result.returncode not in {0, 1}:
         return None
 
-    matches: list[tuple[str, Path]] = []
-    for raw_match in result.stdout.split(b"\0"):
+    matches: list[str] = []
+    start = 0
+    while len(matches) < limit:
+        end = result.stdout.find(b"\0", start)
+        if end < 0:
+            break
+        raw_match = result.stdout[start:end]
+        start = end + 1
         if not raw_match:
             continue
         relative = os.fsdecode(raw_match)
-        if path := lookup.get(relative):
-            matches.append((relative, path))
+        if relative in relative_paths:
+            matches.append(relative)
     return matches
 
 

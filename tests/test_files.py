@@ -51,7 +51,7 @@ def test_python_index_fallback_skips_hidden_and_generated_directories(
         path.write_text("data", encoding="utf-8")
     monkeypatch.setattr("ghostwriter.files.shutil.which", lambda _name: None)
 
-    assert build_file_index(tmp_path) == [visible]
+    assert build_file_index(tmp_path) == ["src/visible.py"]
 
 
 def test_fzf_ranks_non_contiguous_path_matches(
@@ -71,7 +71,7 @@ def test_fzf_ranks_non_contiguous_path_matches(
 
     monkeypatch.setattr("ghostwriter.files.subprocess.run", fake_run)
 
-    matches = find_file_completions(tmp_path, "gapp", [source])
+    matches = find_file_completions(tmp_path, "gapp", ["src/ghostwriter/app.py"])
 
     assert matches == [FileCompletion(source, "src/ghostwriter/app.py")]
 

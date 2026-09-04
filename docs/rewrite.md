@@ -30,7 +30,7 @@ pi --mode rpc --no-tools --no-extensions --no-skills --no-prompt-templates
 
 It receives a transformation-only system prompt and runs from a private cache directory, avoiding project context and tool access. Authentication and model configuration still come from Pi. Keeping this process alive removes repeated CLI and model-runtime startup cost.
 
-Before the first rewrite, Ghostwriter selects the configured model. Before every later rewrite workflow, it sends Pi's `new_session` command and then `set_model`; this prevents one draft's conversation from leaking into another while retaining the warm process. Review revisions continue in the current conversation. The process is terminated and the entire private session directory is deleted when Ghostwriter exits. A hard process or machine crash may leave residue for later manual cleanup.
+Before the first rewrite, Ghostwriter selects the configured model. Before every later rewrite workflow, it sends Pi's `new_session` command and then `set_model`; this prevents one draft's conversation from leaking into another while retaining the warm process. Review revisions continue in the current conversation. The RPC reader discards streaming update events after parsing and retains only completion signals, preventing queued partial-response snapshots from increasing memory use. The process is terminated and the entire private session directory is deleted when Ghostwriter exits. A hard process or machine crash may leave residue for later manual cleanup.
 
 Set `rewrite.keepRpcWarm` to `false` to launch lazily and close after each rewrite workflow.
 

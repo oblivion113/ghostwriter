@@ -28,6 +28,7 @@ for line in sys.stdin:
     elif command == "prompt":
         last_text = "Rewritten __GW_TEST_ATTACHMENT_0000__ text"
         print(json.dumps({"id": request_id, "type": "response", "command": command, "success": True}), flush=True)
+        print(json.dumps({"type": "message_update", "message": {"role": "assistant", "content": "partial"}}), flush=True)
         print(json.dumps({"type": "message_end", "message": {"role": "assistant", "stopReason": "stop"}}), flush=True)
         print(json.dumps({"type": "agent_settled"}), flush=True)
     elif command == "get_last_assistant_text":
@@ -52,6 +53,7 @@ async def test_rpc_session_reuses_process_and_deletes_cached_session(
     created_session = session.session_dir
 
     assert result == "Rewritten __GW_TEST_ATTACHMENT_0000__ text"
+    assert session._events.empty()
     assert created_session.is_dir()
 
     await session.close()

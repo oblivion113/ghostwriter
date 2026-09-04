@@ -59,7 +59,7 @@ Deleting the final display marker removes its attachment metadata. Removing an a
 
 ### File completion
 
-The selected Pi session's working directory is the project root. `files.py` prefers `fd` for a bounded 20,000-file index that respects project and configured ignore files. It then runs `fzf --filter` over that in-memory index for path-aware fuzzy ranking; global fzf options are inherited unless disabled in `fileSearch`. Neither executable is required. Missing or failed tools fall back to the bounded Python walk and deterministic substring ranking, with hidden files and common cache, dependency, and build directories excluded by default. Queries beginning with `/` or `~` use direct filesystem completion. Tab accepts the highlighted candidate.
+The selected Pi session's working directory is the project root. `files.py` prefers `fd` for a bounded 20,000-file index that respects project and configured ignore files. The retained index consists only of relative path strings; absolute `Path` objects are created for the small result set. `fzf --filter` performs path-aware fuzzy ranking, with a bounded-memory Python fallback when unavailable. Global fzf options are inherited unless disabled in `fileSearch`. Hidden files and common cache, dependency, and build directories are excluded by default. Queries beginning with `/` or `~` use direct filesystem completion. Tab accepts the highlighted candidate.
 
 ## Rewrite flow
 

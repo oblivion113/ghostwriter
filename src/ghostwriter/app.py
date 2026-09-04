@@ -202,6 +202,7 @@ class GhostwriterApp(App[None]):
         self.selected_target_id: str | None = None
         self.selected_attachment_id: str | None = None
         self.initial_paths = initial_paths or []
+        self._prompt_editor: TextArea | None = None
         rewrite_config = self.config.rewrite
         default_agent = rewrite_config.default_agent
         self.rewrite_defaults = RewriteOptions(
@@ -215,7 +216,7 @@ class GhostwriterApp(App[None]):
         self.rewrite_rpc = PiRpcSession()
         self._completion_candidates: list[FileCompletion] = []
         self._file_index_root: Path | None = None
-        self._file_index: list[Path] = []
+        self._file_index: list[str] = []
         self._stacked = False
         self._horizontal_split = 0.74
         self._vertical_split = 0.52
@@ -355,6 +356,7 @@ class GhostwriterApp(App[None]):
         self.call_after_refresh(self._apply_split)
 
     def on_mount(self) -> None:
+        self._prompt_editor = self.query_one("#prompt-editor", TextArea)
         table = self.query_one("#attachments", DataTable)
         table.add_column("Attachment")
         self.query_one("#file-completions", OptionList).display = False
@@ -384,6 +386,7 @@ class GhostwriterApp(App[None]):
         self.query_one("#prompt-editor", TextArea).focus()
 
     async def on_unmount(self) -> None:
+        self._capture_text()
         self.store.save(self.draft)
         await self.rewrite_rpc.close()
 
@@ -450,7 +453,8 @@ class GhostwriterApp(App[None]):
         return rewrite
 
     def _capture_text(self) -> None:
-        self.draft.text = self.query_one("#prompt-editor", TextArea).text
+        if self._prompt_editor is not None:
+            self.draft.text = self._prompt_editor.text
 
     def _set_status(self, message: str) -> None:
         self.query_one("#status", Static).update(message)
@@ -481,11 +485,12 @@ class GhostwriterApp(App[None]):
         self.draft.attachments.append(attachment)
         editor = self.query_one("#prompt-editor", TextArea)
         row, column = editor.cursor_location
-        line = editor.text.split("\n")[row]
+        line = editor.document.get_line(row)
         prefix = "" if column == 0 or line[column - 1].isspace() else " "
         suffix = "" if column < len(line) and line[column].isspace() else " "
         editor.insert(f"{prefix}{attachment.editor_token}{suffix}")
         self._refresh_attachment_table()
+        self._capture_text()
         self.store.save(self.draft)
         self._set_status(f"Attached {source.name}")
 
@@ -531,10 +536,9 @@ class GhostwriterApp(App[None]):
     def _completion_context(self) -> tuple[str, tuple[int, int], tuple[int, int]] | None:
         editor = self.query_one("#prompt-editor", TextArea)
         row, column = editor.cursor_location
-        lines = editor.text.split("\n")
-        if row >= len(lines):
+        if row >= editor.document.line_count:
             return None
-        before_cursor = lines[row][:column]
+        before_cursor = editor.document.get_line(row)[:column]
         match = re.search(r"(?<!\S)@(.*)$", before_cursor)
         if match is None:
             return None
@@ -806,8 +810,11 @@ class GhostwriterApp(App[None]):
 
     @on(TextArea.Changed, "#prompt-editor")
     def prompt_changed(self, event: TextArea.Changed) -> None:
-        self.draft.text = event.text_area.text
-        removed = self._reconcile_attachments(self.draft.text)
+        removed = (
+            self._reconcile_attachments(event.text_area.text)
+            if self.draft.attachments
+            else []
+        )
         if removed:
             count = len(removed)
             self._set_status(f"Removed {count} unreferenced attachment{'s' if count != 1 else ''}")
@@ -858,6 +865,7 @@ class GhostwriterApp(App[None]):
         text_preview = self.query_one("#text-preview", TextArea)
         path = self.query_one("#preview-path", Static)
         message = self.query_one("#preview-message", Static)
+        image.image = None
         image.display = False
         text_preview.display = False
 
