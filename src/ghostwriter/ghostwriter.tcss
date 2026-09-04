@@ -14,20 +14,20 @@ Screen {
 }
 
 #settings-menu {
-    width: 18;
+    width: 12;
+    min-width: 0;
     height: 1;
+    padding: 0 1;
+    border: none;
+    background: transparent;
     color: #d7dbe2;
-    background: transparent;
+    text-style: bold;
 }
 
-#settings-menu SelectCurrent {
-    height: 1;
-    background: transparent;
-}
-
-#settings-menu SelectOverlay {
-    width: 18;
-    background: #171b21;
+#settings-menu:hover,
+#settings-menu:focus {
+    background: $primary;
+    color: $button-color-foreground;
 }
 
 #app-title {

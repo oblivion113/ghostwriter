@@ -5,7 +5,6 @@ from collections.abc import Callable, Iterable
 from pathlib import Path
 from typing import ClassVar
 
-from rich.console import RenderableType
 from rich.style import Style
 from rich.text import Text
 from textual import events, on
@@ -100,19 +99,6 @@ class DragHandle(Static):
         self.release_mouse()
         event.stop()
         event.prevent_default()
-
-
-class SettingsSelect(Select[str]):
-    """A reusable action menu whose prompt isn't repeated as an option."""
-
-    def _setup_variables_for_options(
-        self,
-        options: Iterable[tuple[RenderableType, str]],
-    ) -> None:
-        super()._setup_variables_for_options(options)
-        if self._allow_blank:
-            self._options.pop(0)
-            self._legal_values.add(self.NULL)
 
 
 class PromptTextArea(TextArea):
@@ -236,7 +222,17 @@ class GhostwriterApp(App[None]):
         self._prompt_split = 0.8
 
     def get_system_commands(self, screen: Screen) -> Iterable[SystemCommand]:
-        """Keep Textual's useful commands, excluding SVG screenshot export."""
+        """Keep Textual's useful commands and add Ghostwriter configuration actions."""
+        yield SystemCommand(
+            "Open config",
+            "Open Ghostwriter's configuration file in the default editor",
+            self._open_config_command,
+        )
+        yield SystemCommand(
+            "Reload config",
+            "Reload Ghostwriter's configuration from disk",
+            self._reload_config_command,
+        )
         yield from (
             command
             for command in super().get_system_commands(screen)
@@ -253,11 +249,11 @@ class GhostwriterApp(App[None]):
 
     def compose(self) -> ComposeResult:
         with Grid(id="top-bar"):
-            yield SettingsSelect(
-                [("Open config", "open"), ("Reload config", "reload")],
-                prompt="Settings",
+            yield Button(
+                "Settings",
                 id="settings-menu",
                 compact=True,
+                flat=True,
             )
             yield Label(self.TITLE, id="app-title")
         with Horizontal(id="workspace"):
@@ -397,6 +393,23 @@ class GhostwriterApp(App[None]):
 
     def _open_config(self) -> None:
         open_config_file(self.config_store.path)
+
+    def _open_config_command(self) -> None:
+        try:
+            self._open_config()
+        except OSError as error:
+            self.notify(f"Could not open config: {error}", severity="error")
+        else:
+            self.notify("Config opened. Save it, then choose Reload config.")
+
+    def _reload_config_command(self) -> None:
+        try:
+            self._reload_config()
+        except (OSError, TypeError, ValueError) as error:
+            self.notify(f"Could not reload config: {error}", severity="error")
+        else:
+            self._set_status("Config reloaded")
+            self.notify("Config reloaded")
 
     def _reload_config(self) -> RewriteConfig:
         previous_rewrite = self.config.rewrite
@@ -808,25 +821,6 @@ class GhostwriterApp(App[None]):
         self.selected_target_id = target_id if target_id in self.targets else None
         self._file_index_root = None
 
-    @on(Select.Changed, "#settings-menu")
-    def setting_selected(self, event: Select.Changed) -> None:
-        if event.value is Select.NULL:
-            return
-        try:
-            if event.value == "open":
-                self._open_config()
-                self.notify("Config opened. Save it, then select Reload config.")
-            elif event.value == "reload":
-                self._reload_config()
-                self._set_status("Config reloaded")
-                self.notify("Config reloaded")
-        except OSError as error:
-            self.notify(f"Could not {event.value} config: {error}", severity="error")
-        except (TypeError, ValueError) as error:
-            self.notify(f"Could not reload config: {error}", severity="error")
-        finally:
-            event.select.clear()
-
     @on(DataTable.RowHighlighted, "#attachments")
     def attachment_highlighted(self, event: DataTable.RowHighlighted) -> None:
         attachment_id = str(event.row_key.value)
@@ -840,6 +834,8 @@ class GhostwriterApp(App[None]):
     @on(Button.Pressed)
     def button_pressed(self, event: Button.Pressed) -> None:
         match event.button.id:
+            case "settings-menu":
+                self.action_command_palette()
             case "add-attachment":
                 self._open_file_picker()
             case "inject":

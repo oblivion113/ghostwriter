@@ -15,7 +15,7 @@ All notable changes to Ghostwriter will be documented here. The project follows 
 - Removed SVG screenshot export, limited themes to comfortable dark palettes, kept prompt prose white, and highlighted attachment markers in the editor.
 - Forced a full Pi repaint after injection so changed line prefixes and wrapping no longer leave stale editor cells.
 - Kept attachment markers highlighted on the active line and added natural wrapping for mixed CJK prose without changing the saved text.
-- Replaced the clock and subtitle header with a left-aligned Settings menu and right-aligned Ghostwriter title.
+- Replaced the clock and subtitle header with a left-aligned Settings command menu and right-aligned Ghostwriter title; configuration actions join the original Theme, Keys, Quit, and layout commands.
 
 ## 0.2.0 - 2026-08-29
 

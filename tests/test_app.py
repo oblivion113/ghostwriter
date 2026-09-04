@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 from textual import events
 from textual._cells import cell_len
+from textual.command import CommandPalette
 from textual.containers import VerticalScroll
 from textual.widgets import Select
 from textual.widgets._select import InvalidSelectValueError
@@ -248,7 +249,7 @@ def test_command_palette_omits_screenshot_and_only_offers_comfortable_themes() -
     }
 
     assert "Screenshot" not in command_titles
-    assert "Theme" in command_titles
+    assert {"Open config", "Reload config", "Theme", "Quit", "Keys"} <= command_titles
     assert set(app.available_themes) == set(app.COMFORTABLE_THEMES)
     assert all(theme.dark for theme in app.available_themes.values())
 
@@ -304,7 +305,7 @@ async def test_prompt_wraps_mixed_cjk_text_without_a_phantom_newline(tmp_path: P
 
 
 @pytest.mark.asyncio
-async def test_header_has_settings_menu_on_left_and_title_on_right(tmp_path: Path) -> None:
+async def test_header_opens_full_settings_menu_with_title_on_right(tmp_path: Path) -> None:
     app = GhostwriterApp()
     app.store = DraftStore(tmp_path / "draft.json")
     opened: list[bool] = []
@@ -314,25 +315,24 @@ async def test_header_has_settings_menu_on_left_and_title_on_right(tmp_path: Pat
 
     async with app.run_test(size=(120, 40)) as pilot:
         top_bar = app.query_one("#top-bar")
-        settings = app.query_one("#settings-menu", Select)
+        settings = app.query_one("#settings-menu")
         title = app.query_one("#app-title")
 
-        assert settings.prompt == "Settings"
+        assert settings.label.plain == "Settings"
         assert settings.region.x == top_bar.region.x
         assert title.render() == "Ghostwriter"
         assert title.region.right == top_bar.region.right
         assert not app.query("Header")
 
-        await pilot.click("#settings-menu")
-        assert settings.expanded
-        assert settings.query_one("SelectOverlay").option_count == 2
-        settings.value = "open"
-        await pilot.pause()
-        settings.value = "reload"
-        await pilot.pause()
+        commands = {command.title: command for command in app.get_system_commands(app.screen)}
+        commands["Open config"].callback()
+        commands["Reload config"].callback()
         assert opened == [True]
         assert reloaded == [True]
-        assert settings.value is Select.NULL
+
+        await pilot.click("#settings-menu")
+        await pilot.pause()
+        assert isinstance(app.screen, CommandPalette)
 
 
 @pytest.mark.asyncio
