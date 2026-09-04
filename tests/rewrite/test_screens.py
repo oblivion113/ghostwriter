@@ -67,41 +67,16 @@ async def test_rewrite_config_selects_configured_language_and_agent(tmp_path: Pa
 
 
 @pytest.mark.asyncio
-async def test_rewrite_config_can_open_and_reload_edited_choices(tmp_path: Path) -> None:
+async def test_rewrite_config_leaves_settings_in_main_window(tmp_path: Path) -> None:
     app = GhostwriterApp()
     app.draft = Draft(text="Rewrite me")
     app.store = DraftStore(tmp_path / "draft.json")
-    initial = RewriteConfig(
-        agents=(RewriteAgent("anthropic", "claude-haiku"),),
-        target_languages=("French",),
-        default_target_language="French",
-    )
-    edited = RewriteConfig(
-        agents=(RewriteAgent("openai", "gpt-test"),),
-        target_languages=("Japanese",),
-        default_target_language="Japanese",
-        instructions="Keep it concise.",
-        prompt="Write in {target_language}.\n{instructions}\n{text}",
-    )
-    opened: list[bool] = []
 
     async with app.run_test(size=(88, 30)) as pilot:
-        screen = RewriteConfigScreen(
-            RewriteOptions(agent="anthropic/claude-haiku", target_language="French"),
-            initial,
-            tmp_path / "config.json",
-            open_config=lambda: opened.append(True),
-            reload_config=lambda: edited,
-        )
+        screen = RewriteConfigScreen(RewriteOptions())
         app.push_screen(screen)
         await pilot.pause()
 
-        screen.open_config_button()
-        screen.reload_config_button()
-        await pilot.pause()
-
-        assert opened == [True]
-        assert screen.query_one("#rewrite-target").value == "Japanese"
-        assert screen.query_one("#rewrite-agent").value == "openai/gpt-test"
-        assert screen.query_one("#rewrite-open-config").region.y < screen.size.height
-        assert screen.query_one("#rewrite-reload-config").region.y < screen.size.height
+        assert not screen.query("#rewrite-open-config")
+        assert not screen.query("#rewrite-reload-config")
+        assert "Settings" in str(screen.query_one(".dialog-help").render())

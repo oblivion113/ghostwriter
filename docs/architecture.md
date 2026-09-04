@@ -24,6 +24,7 @@ The Python application owns composition and local state. The TypeScript extensio
 | `src/ghostwriter/model.py` | Versioned `Draft` and `Attachment` serialization |
 | `src/ghostwriter/config.py` | Unified JSON rewrite settings, defaults, and prompt validation |
 | `src/ghostwriter/files.py` | Dragged-path parsing, native picker, recursive `@` index, and safe previews |
+| `src/ghostwriter/wrapping.py` | Incremental CJK-aware soft wrapping that preserves source text |
 | `src/ghostwriter/storage.py` | Atomic draft persistence and content-addressed image cache |
 | `src/ghostwriter/pi.py` | Pi registry discovery, Pi attachment syntax, and socket exchange |
 | `src/ghostwriter/rewrite/` | Pi RPC process, rewrite prompts, review screens, and placeholder validation |
@@ -43,7 +44,7 @@ The project is intentionally Pi-specific. `PiBridgeClient` is a concrete boundar
    - images become persistent absolute cache paths.
 6. `PiBridgeClient.inject()` sends one bounded newline-delimited JSON request.
 7. The extension validates protocol version, session ID, working directory, draft revision, and request size.
-8. `ctx.ui.setEditorText()` replaces Pi's unsent input. The extension returns a SHA-256 acknowledgement.
+8. `ctx.ui.setEditorText()` replaces Pi's unsent input and the extension requests a full repaint. It then returns a SHA-256 acknowledgement.
 9. The user reviews and submits from Pi. Ghostwriter never submits automatically.
 
 ## Attachment state

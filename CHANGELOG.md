@@ -13,6 +13,9 @@ All notable changes to Ghostwriter will be documented here. The project follows 
 - Fixed duplicate terminal paste and speech-recognition insertion caused by re-running Textual's default handlers.
 - Soft-wrapped prompt text without horizontal scrolling and replaced the expanded Pi target list with a dropdown that has no selectable empty entry.
 - Removed SVG screenshot export, limited themes to comfortable dark palettes, kept prompt prose white, and highlighted attachment markers in the editor.
+- Forced a full Pi repaint after injection so changed line prefixes and wrapping no longer leave stale editor cells.
+- Kept attachment markers highlighted on the active line and added natural wrapping for mixed CJK prose without changing the saved text.
+- Replaced the clock and subtitle header with a left-aligned Settings menu and right-aligned Ghostwriter title.
 
 ## 0.2.0 - 2026-08-29
 

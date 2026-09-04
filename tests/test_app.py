@@ -4,6 +4,7 @@ from pathlib import Path
 
 import pytest
 from textual import events
+from textual._cells import cell_len
 from textual.containers import VerticalScroll
 from textual.widgets import Select
 from textual.widgets._select import InvalidSelectValueError
@@ -40,6 +41,15 @@ async def test_adding_file_inserts_marker_at_cursor(tmp_path: Path) -> None:
         assert attachment_spans
         assert attachment_spans[0].style.bold
         assert attachment_spans[0].style.color is not None
+
+        editor.cursor_location = (0, 0)
+        active_line = editor.render_line(0)
+        assert any(
+            attachment.editor_token in segment.text
+            and segment.style is not None
+            and segment.style.color == attachment_spans[0].style.color
+            for segment in active_line
+        )
 
 
 @pytest.mark.asyncio
@@ -267,6 +277,62 @@ async def test_prompt_soft_wraps_without_horizontal_scrolling(tmp_path: Path) ->
         assert editor.soft_wrap
         assert editor.styles.overflow_x == "hidden"
         assert editor.max_scroll_x == 0
+
+
+@pytest.mark.asyncio
+async def test_prompt_wraps_mixed_cjk_text_without_a_phantom_newline(tmp_path: Path) -> None:
+    app = GhostwriterApp()
+    app.draft = Draft(text="")
+    app.store = DraftStore(tmp_path / "draft.json")
+
+    async with app.run_test(size=(80, 30)):
+        editor = app.query_one("#prompt-editor")
+        width = editor.wrap_width
+        prefix = "a " * ((width - 8) // 2)
+        text = prefix + "english这是一段测试中文"
+        editor.load_text(text)
+        sections = editor.wrapped_document.get_sections(0)
+
+        assert "".join(sections) == text
+        assert "\n" not in editor.text
+        assert len(sections) == 2
+        assert cell_len(sections[0]) >= width - 2
+
+        editor.cursor_location = (0, len(text))
+        editor.insert("继续")
+        assert "".join(editor.wrapped_document.get_sections(0)) == text + "继续"
+
+
+@pytest.mark.asyncio
+async def test_header_has_settings_menu_on_left_and_title_on_right(tmp_path: Path) -> None:
+    app = GhostwriterApp()
+    app.store = DraftStore(tmp_path / "draft.json")
+    opened: list[bool] = []
+    reloaded: list[bool] = []
+    app._open_config = lambda: opened.append(True)  # type: ignore[method-assign]
+    app._reload_config = lambda: reloaded.append(True)  # type: ignore[method-assign]
+
+    async with app.run_test(size=(120, 40)) as pilot:
+        top_bar = app.query_one("#top-bar")
+        settings = app.query_one("#settings-menu", Select)
+        title = app.query_one("#app-title")
+
+        assert settings.prompt == "Settings"
+        assert settings.region.x == top_bar.region.x
+        assert title.render() == "Ghostwriter"
+        assert title.region.right == top_bar.region.right
+        assert not app.query("Header")
+
+        await pilot.click("#settings-menu")
+        assert settings.expanded
+        assert settings.query_one("SelectOverlay").option_count == 2
+        settings.value = "open"
+        await pilot.pause()
+        settings.value = "reload"
+        await pilot.pause()
+        assert opened == [True]
+        assert reloaded == [True]
+        assert settings.value is Select.NULL
 
 
 @pytest.mark.asyncio

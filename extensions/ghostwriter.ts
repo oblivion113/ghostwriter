@@ -10,6 +10,7 @@ import {
 
 const PROTOCOL_VERSION = 1;
 const MAX_REQUEST_BYTES = 4 * 1024 * 1024;
+const RENDER_HOOK_KEY = "ghostwriter-render-hook";
 const RUNTIME_DIR = join(getAgentDir(), "run", "ghostwriter");
 // Keep the socket path short enough for macOS's 104-byte AF_UNIX limit.
 const SOCKET_DIR = join("/tmp", `ghostwriter-${process.getuid?.() ?? process.pid}`);
@@ -57,6 +58,7 @@ export default function ghostwriterBridge(pi: ExtensionAPI): void {
   let activeContext: ExtensionContext | undefined;
   let startedAt: string | undefined;
   let registryWrites = Promise.resolve();
+  let forceEditorRender: (() => void) | undefined;
   const applied = new Map<string, AppliedRevision>();
 
   async function removeRuntimeFiles(): Promise<void> {
@@ -67,7 +69,10 @@ export default function ghostwriterBridge(pi: ExtensionAPI): void {
   }
 
   async function stop(): Promise<void> {
+    const previousContext = activeContext;
     activeContext = undefined;
+    forceEditorRender = undefined;
+    previousContext?.ui.setWidget(RENDER_HOOK_KEY, undefined);
     const current = server;
     server = undefined;
     if (current) {
@@ -153,9 +158,9 @@ export default function ghostwriterBridge(pi: ExtensionAPI): void {
         }
 
         ctx.ui.setEditorText(request.text);
-        // setEditorText updates editor state but Pi does not currently schedule a
-        // render when it is called from an external socket callback.
-        ctx.ui.setStatus("ghostwriter-render", undefined);
+        // Socket callbacks run outside Pi's keyboard event path. Force a complete paint so
+        // the terminal renderer cannot retain cells from the previous editor contents.
+        forceEditorRender?.();
         applied.set(request.draftId, { revision: request.revision, sha256 });
         reply(socket, {
           ok: true,
@@ -197,6 +202,10 @@ export default function ghostwriterBridge(pi: ExtensionAPI): void {
     await stop();
     activeContext = ctx;
     startedAt = new Date().toISOString();
+    ctx.ui.setWidget(RENDER_HOOK_KEY, (tui) => {
+      forceEditorRender = () => tui.requestRender(true);
+      return { render: () => [], invalidate: () => undefined };
+    });
     await mkdir(RUNTIME_DIR, { recursive: true, mode: 0o700 });
     await mkdir(SOCKET_DIR, { recursive: true, mode: 0o700 });
     await chmod(RUNTIME_DIR, 0o700);

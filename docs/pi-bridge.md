@@ -55,7 +55,8 @@ Only the following Pi surface is required:
 | `ctx.sessionManager.getSessionId()` | Bind requests to the current session |
 | `ctx.sessionManager.getSessionName()` | Publish a user-readable session name |
 | `ctx.ui.setEditorText(text)` | Replace the unsent Pi editor content |
-| `ctx.ui.setStatus(key, value)` | Trigger a TUI render after an external socket callback |
+| `ctx.ui.setWidget(key, factory)` | Install an invisible component that captures the TUI render requester |
+| `tui.requestRender(true)` | Fully repaint editor cells after an external socket callback |
 | `ctx.ui.notify(message, level)` | Display `/ghostwriter-status` output |
 
 Long-lived resources must not start in the extension factory. Ghostwriter creates them during `session_start` and performs idempotent cleanup during `session_shutdown`. Session switches, forks, reloads, and normal exit all pass through these lifecycle events.
@@ -154,16 +155,16 @@ The Python client uses a three-second exchange timeout. The extension uses a fiv
 
 ## Editor replacement behavior
 
-After successful validation, the extension calls:
+After successful validation, the extension replaces the editor text and requests a full TUI repaint:
 
 ```ts
 ctx.ui.setEditorText(request.text);
-ctx.ui.setStatus("ghostwriter-render", undefined);
+forceEditorRender?.();
 ```
 
-`setEditorText` updates only Pi's unsent input. It does not submit, append a conversation message, or start an agent turn. The status call requests a render because the socket callback occurs outside Pi's normal keyboard event path.
+`setEditorText` updates only Pi's unsent input. It does not submit, append a conversation message, or start an agent turn. Socket callbacks occur outside Pi's normal keyboard event path, and an incremental render can leave stale cells when the replacement changes line prefixes or wrapping. During `session_start`, Ghostwriter installs a zero-line widget factory to capture the supported TUI object; `forceEditorRender` calls `tui.requestRender(true)`. The hook is removed during shutdown and never adds visible content.
 
-This render workaround is intentionally isolated in the extension. If a future Pi release schedules rendering from `setEditorText` automatically, remove it only after an interactive regression test.
+This render workaround is intentionally isolated in the extension. If a future Pi release makes `setEditorText` schedule a full repaint itself, remove the hook only after an interactive regression test.
 
 ## Attachment serialization
 

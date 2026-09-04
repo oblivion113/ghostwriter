@@ -5,12 +5,15 @@ from collections.abc import Callable, Iterable
 from pathlib import Path
 from typing import ClassVar
 
+from rich.console import RenderableType
+from rich.style import Style
 from rich.text import Text
 from textual import events, on
 from textual.app import App, ComposeResult, SystemCommand
 from textual.binding import Binding
 from textual.command import CommandPalette
-from textual.containers import Horizontal, Vertical, VerticalScroll
+from textual.containers import Grid, Horizontal, Vertical, VerticalScroll
+from textual.document._document_navigator import DocumentNavigator
 from textual.events import Resize
 from textual.message import Message
 from textual.screen import Screen
@@ -19,7 +22,6 @@ from textual.widgets import (
     Button,
     DataTable,
     Footer,
-    Header,
     Label,
     OptionList,
     Select,
@@ -27,6 +29,7 @@ from textual.widgets import (
     TextArea,
 )
 from textual.widgets.option_list import Option
+from textual.widgets.text_area import TextAreaTheme
 from textual_image.widget import Image
 
 from .config import ConfigStore, RewriteConfig, open_config_file
@@ -50,6 +53,7 @@ from .rewrite import (
 )
 from .rewrite.screens import RewriteConfigScreen, RewriteReviewScreen
 from .storage import DraftStore, ImageCache
+from .wrapping import NaturalWrappedDocument
 
 
 class DragHandle(Static):
@@ -98,8 +102,39 @@ class DragHandle(Static):
         event.prevent_default()
 
 
+class SettingsSelect(Select[str]):
+    """A reusable action menu whose prompt isn't repeated as an option."""
+
+    def _setup_variables_for_options(
+        self,
+        options: Iterable[tuple[RenderableType, str]],
+    ) -> None:
+        super()._setup_variables_for_options(options)
+        if self._allow_blank:
+            self._options.pop(0)
+            self._legal_values.add(self.NULL)
+
+
 class PromptTextArea(TextArea):
     COMPONENT_CLASSES = TextArea.COMPONENT_CLASSES | {"prompt-attachment"}
+
+    def __init__(self, *args: object, **kwargs: object) -> None:
+        super().__init__(*args, **kwargs)
+        theme = TextAreaTheme(
+            "ghostwriter",
+            cursor_line_style=Style(bgcolor="#1d2126"),
+        )
+        self.register_theme(theme)
+        self.theme = theme.name
+
+    def _set_document(self, text: str, language: str | None) -> None:
+        super()._set_document(text, language)
+        self.wrapped_document = NaturalWrappedDocument(
+            self.document,
+            tab_width=self.indent_width,
+        )
+        self.navigator = DocumentNavigator(self.wrapped_document)
+        self._rewrap_and_refresh_virtual_size()
 
     def get_line(self, line_index: int) -> Text:
         line = super().get_line(line_index)
@@ -141,7 +176,7 @@ class CurrentThemeProvider(ThemeProvider):
 
 class GhostwriterApp(App[None]):
     TITLE = "Ghostwriter"
-    SUB_TITLE = "Compose here. Submit in Pi."
+    SUB_TITLE = ""
     NO_TARGET_ID = "__no-active-pi-session__"
     NO_TARGET_LABEL = "No active Pi session"
     CSS_PATH = "ghostwriter.tcss"
@@ -217,7 +252,14 @@ class GhostwriterApp(App[None]):
         )
 
     def compose(self) -> ComposeResult:
-        yield Header(show_clock=True)
+        with Grid(id="top-bar"):
+            yield SettingsSelect(
+                [("Open config", "open"), ("Reload config", "reload")],
+                prompt="Settings",
+                id="settings-menu",
+                compact=True,
+            )
+            yield Label(self.TITLE, id="app-title")
         with Horizontal(id="workspace"):
             with Vertical(id="editor-pane"):
                 yield Label("PROMPT", classes="section-title")
@@ -646,13 +688,7 @@ class GhostwriterApp(App[None]):
         except (OSError, TypeError, ValueError) as error:
             self.notify(f"Could not reload config: {error}", severity="warning")
         options = await self.push_screen_wait(
-            RewriteConfigScreen(
-                self.rewrite_defaults,
-                self.config.rewrite,
-                self.config_store.path,
-                open_config=self._open_config,
-                reload_config=self._reload_config,
-            )
+            RewriteConfigScreen(self.rewrite_defaults, self.config.rewrite)
         )
         if options is None:
             return
@@ -771,6 +807,25 @@ class GhostwriterApp(App[None]):
         target_id = None if event.value is Select.NULL else str(event.value)
         self.selected_target_id = target_id if target_id in self.targets else None
         self._file_index_root = None
+
+    @on(Select.Changed, "#settings-menu")
+    def setting_selected(self, event: Select.Changed) -> None:
+        if event.value is Select.NULL:
+            return
+        try:
+            if event.value == "open":
+                self._open_config()
+                self.notify("Config opened. Save it, then select Reload config.")
+            elif event.value == "reload":
+                self._reload_config()
+                self._set_status("Config reloaded")
+                self.notify("Config reloaded")
+        except OSError as error:
+            self.notify(f"Could not {event.value} config: {error}", severity="error")
+        except (TypeError, ValueError) as error:
+            self.notify(f"Could not reload config: {error}", severity="error")
+        finally:
+            event.select.clear()
 
     @on(DataTable.RowHighlighted, "#attachments")
     def attachment_highlighted(self, event: DataTable.RowHighlighted) -> None:
