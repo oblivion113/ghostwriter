@@ -22,23 +22,23 @@ Final Pi serialization happens later. The bridge client replaces local markers w
 
 ## RPC isolation and lifetime
 
-By default, app startup launches one background process:
+When warm mode is enabled, app startup launches one background process:
 
 ```text
 pi --mode rpc --no-tools --no-extensions --no-skills --no-prompt-templates
 ```
 
-It receives a transformation-only system prompt and runs from a private cache directory, avoiding project context and tool access. Authentication and model configuration still come from Pi. Keeping this process alive removes repeated CLI and model-runtime startup cost.
+It receives a transformation-only system prompt and runs from a private cache directory, avoiding project context and tool access. Authentication and model configuration still come from Pi. By default, the process starts on demand and closes after each rewrite workflow to minimize idle memory. Keeping it warm is an opt-in that removes repeated CLI and model-runtime startup cost.
 
 Before the first rewrite, Ghostwriter selects the configured model. Before every later rewrite workflow, it sends Pi's `new_session` command and then `set_model`; this prevents one draft's conversation from leaking into another while retaining the warm process. Review revisions continue in the current conversation. The RPC reader discards streaming update events after parsing and retains only completion signals, preventing queued partial-response snapshots from increasing memory use. The process is terminated and the entire private session directory is deleted when Ghostwriter exits. A hard process or machine crash may leave residue for later manual cleanup.
 
-Set `rewrite.keepRpcWarm` to `false` to launch lazily and close after each rewrite workflow.
+Set `rewrite.keepRpcWarm` to `true` to prewarm the process and retain it across workflows.
 
 ## Unified configuration
 
 On first start, Ghostwriter writes `config.json` under `user_config_path("ghostwriter")`. The `rewrite` object defines:
 
-- `keepRpcWarm`: whether app startup prewarms and retains the RPC process;
+- `keepRpcWarm`: whether app startup prewarms and retains the RPC process; defaults to `false`;
 - `agents`: ordered `{provider, model}` choices; the first entry is the default, and a pair of blank values offers Pi's default;
 - `targetLanguages` and `defaultTargetLanguage`: the language dropdown values and default;
 - `instructions`: optional standing user directions, stored directly in JSON rather than an external file;
@@ -70,7 +70,7 @@ The generated default prompt treats attachment placeholders as immutable, tells 
 3. Set source and target languages.
 4. Choose a rewrite agent from the configured dropdown.
 5. If needed, select **Open config**, save edits, and select **Reload config**.
-6. Select **Run** or press `Ctrl+Enter`; the already-warm RPC is used when enabled.
+6. Select **Run** or press `Ctrl+Enter`; the RPC starts on demand unless warm mode is enabled.
 7. Review the returned draft.
 8. Accept, reject, edit directly, or provide revision feedback. Revisions reuse the same live RPC conversation.
 

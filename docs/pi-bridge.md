@@ -204,7 +204,7 @@ Ghostwriter uses these documented RPC commands:
 | `prompt` | Start a transform or review revision |
 | `get_last_assistant_text` | Retrieve the settled result |
 
-The default app-lifetime process still uses a private persistent session directory because Pi's RPC session replacement API is being used. All session files are deleted with that directory during normal Ghostwriter shutdown. Setting `rewrite.keepRpcWarm` to `false` restores per-workflow process cleanup.
+By default, Ghostwriter launches the process on demand and removes its private session directory after each rewrite workflow. Setting `rewrite.keepRpcWarm` to `true` prewarms one app-lifetime process; it requires a private persistent session directory because Pi's RPC session replacement API is used between workflows. All session files are deleted with that directory during normal Ghostwriter shutdown.
 
 ## Coordinated changes
 

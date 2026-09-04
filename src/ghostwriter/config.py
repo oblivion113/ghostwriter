@@ -56,7 +56,7 @@ class RewriteAgent:
 
 @dataclass(frozen=True, slots=True)
 class RewriteConfig:
-    keep_rpc_warm: bool = True
+    keep_rpc_warm: bool = False
     agents: tuple[RewriteAgent, ...] = (RewriteAgent("agent-plan", "ark-code-latest"),)
     target_languages: tuple[str, ...] = (
         "English",
@@ -115,7 +115,7 @@ class RewriteConfig:
         default_language = str(data.get("defaultTargetLanguage", languages[0])).strip()
         instructions = str(data.get("instructions", ""))
         prompt = str(data.get("prompt", DEFAULT_REWRITE_PROMPT))
-        keep_rpc_warm = data.get("keepRpcWarm", True)
+        keep_rpc_warm = data.get("keepRpcWarm", False)
         if not isinstance(keep_rpc_warm, bool):
             raise TypeError("rewrite.keepRpcWarm must be true or false")
         if default_language not in languages:

@@ -66,13 +66,12 @@ The selected Pi session's working directory is the project root. `files.py` pref
 Rewrite is separate from visible Pi injection:
 
 1. `ConfigStore` supplies file-search policy, ordered provider/model agents, target languages, extra instructions, warm-up policy, and the prompt template.
-2. App startup normally launches `PiRpcSession` once with tools and project resources disabled.
-3. `RewriteConfigScreen` returns validated `RewriteOptions` from configured dropdowns.
-4. `PiRpcSession.prepare()` starts a fresh Pi session for every workflow after the first and selects its configured model.
-5. `AttachmentProtector` replaces every local marker occurrence with a random opaque token.
-6. Responses are checked so every expected placeholder occurs exactly once. One repair request is allowed if integrity fails.
-7. The review screen supports acceptance, rejection, direct edits, and revision feedback in the same RPC conversation.
-8. App shutdown terminates the shared child and removes its private session directory. With warm mode disabled, cleanup instead happens after each workflow.
+2. `RewriteConfigScreen` returns validated `RewriteOptions` from configured dropdowns.
+3. `PiRpcSession.prepare()` launches an isolated process on demand and selects its configured model. Warm mode instead prewarms one process and starts a fresh Pi session for every workflow after the first.
+4. `AttachmentProtector` replaces every local marker occurrence with a random opaque token.
+5. Responses are checked so every expected placeholder occurs exactly once. One repair request is allowed if integrity fails.
+6. The review screen supports acceptance, rejection, direct edits, and revision feedback in the same RPC conversation.
+7. With the default on-demand mode, cleanup happens after each workflow. Warm mode retains the shared child until app shutdown. Both paths remove their private session directory.
 
 No attachment path, filename, or content is sent to the rewrite model.
 

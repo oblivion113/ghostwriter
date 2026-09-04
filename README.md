@@ -112,7 +112,7 @@ Deleting a marker from the prompt removes its unreferenced attachment automatica
 
 Press `F4` to open the rewrite configuration. Select Translate, Tidy, a target language, and a configured rewrite agent, then choose **Run** or press `Ctrl+Enter`. Ghostwriter protects inline attachments with opaque placeholders and returns the result to a review dialog. You may accept, reject, directly edit, or provide revision feedback in the same RPC conversation.
 
-By default, Ghostwriter starts one tool-free Pi RPC process in the background and keeps it warm for the app's lifetime. Each new rewrite receives a fresh Pi session, while revisions retain the current conversation. On exit, Ghostwriter terminates the process and deletes its private session directory. Set `rewrite.keepRpcWarm` to `false` to use one process per workflow instead.
+By default, Ghostwriter starts the tool-free Pi RPC process only when a rewrite begins and closes it after that workflow, minimizing idle memory use. Revisions within the workflow retain the current conversation. Set `rewrite.keepRpcWarm` to `true` to prewarm one background process at app startup and retain it across workflows; each workflow still receives a fresh Pi session.
 
 The accepted result returns to Ghostwriter—not Pi's visible editor. Attachment mappings, paths, and content remain local. Every placeholder is validated before restoration.
 
@@ -130,7 +130,7 @@ Ghostwriter creates one `config.json` in the platform user configuration directo
     "fzfOptions": []
   },
   "rewrite": {
-    "keepRpcWarm": true,
+    "keepRpcWarm": false,
     "agents": [
       { "provider": "agent-plan", "model": "ark-code-latest" },
       { "provider": "anthropic", "model": "claude-haiku-4-5" }

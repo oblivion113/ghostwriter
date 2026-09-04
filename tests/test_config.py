@@ -24,7 +24,7 @@ def test_config_store_creates_editable_defaults(tmp_path: Path) -> None:
     assert config.file_search.use_global_fzf_options
     assert "node_modules" in config.file_search.skipped_directories
     assert "fileSearch" in path.read_text(encoding="utf-8")
-    assert config.rewrite.keep_rpc_warm
+    assert not config.rewrite.keep_rpc_warm
     assert config.rewrite.default_agent.provider == "agent-plan"
     assert config.rewrite.default_agent.model == "ark-code-latest"
     assert config.rewrite.instructions == ""
@@ -46,7 +46,7 @@ def test_config_loads_agents_languages_and_custom_prompt(tmp_path: Path) -> None
                     "fzfOptions": ["--exact"],
                 },
                 "rewrite": {
-                    "keepRpcWarm": False,
+                    "keepRpcWarm": True,
                     "agents": [
                         {
                             "provider": "anthropic",
@@ -69,7 +69,7 @@ def test_config_loads_agents_languages_and_custom_prompt(tmp_path: Path) -> None
     assert not config.file_search.use_global_fzf_options
     assert config.file_search.fzf_options == ("--exact",)
     assert config.file_search.ignore_files[0].is_absolute()
-    assert not config.rewrite.keep_rpc_warm
+    assert config.rewrite.keep_rpc_warm
     assert config.rewrite.default_agent.label == "anthropic/claude-haiku"
     assert config.rewrite.default_target_language == "French"
     assert config.rewrite.instructions == "Use a direct tone."
