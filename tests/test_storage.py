@@ -1,16 +1,14 @@
 from pathlib import Path
 
-from PIL import Image
-
 from ghostwriter.model import Attachment, Draft
-from ghostwriter.storage import DraftStore, ImageCache
+from ghostwriter.storage import DraftStore, clear_legacy_image_cache
 
 
 def test_draft_store_round_trip(tmp_path: Path) -> None:
     store = DraftStore(tmp_path / "state" / "draft.json")
     draft = Draft(
         text="hello",
-        attachments=[Attachment("file", "/tmp/source", "/tmp/source")],
+        attachments=[Attachment("file", "/tmp/source")],
         revision=4,
     )
 
@@ -23,7 +21,6 @@ def test_draft_store_round_trip(tmp_path: Path) -> None:
 def test_version_one_draft_migrates_verbose_attachment_marker() -> None:
     attachment = Attachment(
         "file",
-        "/tmp/context.md",
         "/tmp/context.md",
         id="abcdef1234567890",
     )
@@ -39,14 +36,31 @@ def test_version_one_draft_migrates_verbose_attachment_marker() -> None:
     assert restored.attachments[0].editor_token == "@context.md"
 
 
-def test_image_cache_is_content_addressed(tmp_path: Path) -> None:
-    source = tmp_path / "source.png"
-    Image.new("RGB", (3, 2), "#7aa2f7").save(source)
-    cache = ImageCache(tmp_path / "cache")
+def test_legacy_image_cache_is_removed(tmp_path: Path) -> None:
+    cache = tmp_path / "images"
+    cache.mkdir()
+    (cache / "large-image.png").write_bytes(b"cached")
 
-    first = cache.stage(source)
-    second = cache.stage(source)
+    clear_legacy_image_cache(cache)
 
-    assert first == second
-    assert first.suffix == ".png"
-    assert first.read_bytes() == source.read_bytes()
+    assert not cache.exists()
+
+
+def test_version_two_draft_discards_staged_attachment_path() -> None:
+    restored = Draft.from_dict(
+        {
+            "version": 2,
+            "attachments": [
+                {
+                    "kind": "image",
+                    "source_path": "/private/source.png",
+                    "injected_path": "/cache/hash.png",
+                    "id": "abcdef1234567890",
+                }
+            ],
+        }
+    )
+
+    assert restored.to_dict()["version"] == 3
+    assert restored.attachments[0].source == Path("/private/source.png")
+    assert "injected_path" not in restored.attachments[0].to_dict()

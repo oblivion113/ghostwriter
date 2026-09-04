@@ -28,7 +28,6 @@ async def test_transform_and_revision_reuse_session_without_exposing_path() -> N
     attachment = Attachment(
         "image",
         "/private/secret screenshot.png",
-        "/cache/image.png",
         id="1234567890abcdef",
     )
     draft = Draft(text=f"messy {attachment.editor_token} text", attachments=[attachment])
@@ -54,7 +53,7 @@ async def test_transform_and_revision_reuse_session_without_exposing_path() -> N
 
 @pytest.mark.asyncio
 async def test_custom_prompt_receives_language_and_protected_text() -> None:
-    attachment = Attachment("file", "/private/notes.md", "/private/notes.md", id="abcdef1234567890")
+    attachment = Attachment("file", "/private/notes.md", id="abcdef1234567890")
     draft = Draft(text=f"bonjour {attachment.editor_token}", attachments=[attachment])
     session = RewriteSession(
         draft,

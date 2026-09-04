@@ -170,12 +170,11 @@ This render workaround is intentionally isolated in the extension. If a future P
 
 The editor marker is local Ghostwriter state. Before injection, Python emits Pi-compatible text:
 
-- a regular file under Pi's working directory becomes `@relative/path`;
+- any attachment under Pi's working directory becomes `@relative/path`;
 - a path containing whitespace becomes `@"relative/path with spaces"`;
-- a file outside the working directory becomes an absolute `@path` reference;
-- an image becomes the absolute path of its validated content-addressed cache copy.
+- an attachment outside the working directory becomes an absolute `@path` reference.
 
-Paths containing quotes or line breaks are rejected because they cannot be represented safely by the current Pi file-reference syntax.
+Ghostwriter always references the original file; it does not hash, copy, or symlink attachments. Images and other files use identical serialized syntax. Pi's `read` tool detects supported images from their byte signatures when the agent opens a reference, while Ghostwriter's stored `kind` exists only to select a local preview. Paths containing quotes or line breaks are rejected because they cannot be represented safely by the current Pi file-reference syntax.
 
 ## Status command
 

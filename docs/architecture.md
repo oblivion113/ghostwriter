@@ -25,7 +25,7 @@ The Python application owns composition and local state. The TypeScript extensio
 | `src/ghostwriter/config.py` | Unified JSON rewrite settings, defaults, and prompt validation |
 | `src/ghostwriter/files.py` | Dragged-path parsing, native picker, recursive `@` index, and safe previews |
 | `src/ghostwriter/wrapping.py` | Incremental CJK-aware soft wrapping that preserves source text |
-| `src/ghostwriter/storage.py` | Atomic draft persistence and content-addressed image cache |
+| `src/ghostwriter/storage.py` | Atomic draft persistence and legacy image-cache cleanup |
 | `src/ghostwriter/pi.py` | Pi registry discovery, Pi attachment syntax, and socket exchange |
 | `src/ghostwriter/rewrite/` | Pi RPC process, rewrite prompts, review screens, and placeholder validation |
 | `extensions/ghostwriter.ts` | Pi package entry point, session registry, socket server, and status command |
@@ -37,11 +37,9 @@ The project is intentionally Pi-specific. `PiBridgeClient` is a concrete boundar
 
 1. `GhostwriterApp` loads a versioned draft from `DraftStore`.
 2. Files enter through drag-and-drop, the native picker, startup arguments, or `@` completion.
-3. The editor displays a compact `@filename` marker while `Attachment` retains the source path, staged path, kind, and stable ID.
+3. The editor displays a compact `@filename` marker while `Attachment` retains the original source path, preview kind, and stable ID.
 4. The selected `PiTarget` supplies the target working directory and socket.
-5. `serialize_draft()` replaces display markers with Pi syntax:
-   - files become `@relative/path` or `@"path with spaces"` when representable relative to Pi's working directory;
-   - images become persistent absolute cache paths.
+5. `serialize_draft()` replaces every display marker with the same Pi file-reference syntax: `@relative/path`, `@"path with spaces"`, or an absolute reference when the source is outside Pi's working directory.
 6. `PiBridgeClient.inject()` sends one bounded newline-delimited JSON request.
 7. The extension validates protocol version, session ID, working directory, draft revision, and request size.
 8. `ctx.ui.setEditorText()` replaces Pi's unsent input and the extension requests a full repaint. It then returns a SHA-256 acknowledgement.
@@ -52,10 +50,10 @@ The project is intentionally Pi-specific. `PiBridgeClient` is a concrete boundar
 `Attachment` separates three representations:
 
 - **Display:** `@filename` inside the Textual editor
-- **Local metadata:** source path, staged path, kind, and ID in the persisted draft
-- **Pi representation:** relative file reference or cached absolute image path
+- **Local metadata:** original source path, preview kind, and ID in the persisted draft
+- **Pi representation:** a relative or absolute reference to that original source
 
-The UI intentionally does not ask users to distinguish files from images. Image detection and validation happen internally when the attachment is added. Duplicate source files and duplicate display filenames are rejected because an unambiguous display marker is required.
+The UI intentionally does not ask users to distinguish files from images. A suffix-based kind is recorded only for local preview selection; Pi inspects file content when its `read` tool opens the original path. Duplicate source files and duplicate display filenames are rejected because an unambiguous display marker is required.
 
 Deleting the final display marker removes its attachment metadata. Removing an attachment from the table performs the inverse operation and deletes every matching marker.
 
@@ -99,8 +97,8 @@ Paths use `platformdirs`, so exact locations vary by operating system:
 
 - config: `user_config_path("ghostwriter")/config.json`
 - state: `user_state_path("ghostwriter")/draft.json`
-- cache: `user_cache_path("ghostwriter")/images/`
 - rewrite sessions: `user_cache_path("ghostwriter")/rewrite-sessions/`
+- legacy attachment cache: `user_cache_path("ghostwriter")/images/` (removed in a background startup task and never recreated)
 - Pi registry: `<Pi agent dir>/run/ghostwriter/*.json`
 - sockets: `/tmp/ghostwriter-<uid>/*.sock`
 

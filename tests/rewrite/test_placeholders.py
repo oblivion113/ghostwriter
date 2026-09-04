@@ -10,7 +10,6 @@ def attachment() -> Attachment:
     return Attachment(
         "file",
         "/private/notes/secret plan.md",
-        "/private/notes/secret plan.md",
         id="abcdef1234567890",
     )
 

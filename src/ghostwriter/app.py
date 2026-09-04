@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import re
 from collections.abc import Callable, Iterable
 from pathlib import Path
@@ -51,7 +52,7 @@ from .rewrite import (
     RewriteSession,
 )
 from .rewrite.screens import RewriteConfigScreen, RewriteReviewScreen
-from .storage import DraftStore, ImageCache
+from .storage import DraftStore, clear_legacy_image_cache
 from .wrapping import NaturalWrappedDocument
 
 
@@ -194,7 +195,6 @@ class GhostwriterApp(App[None]):
             self.unregister_theme(theme_name)
         self.store = DraftStore()
         self.config_store = ConfigStore()
-        self.image_cache = ImageCache()
         self.draft = self.store.load()
         self.config = self.config_store.load()
         self.pi = PiBridgeClient()
@@ -372,6 +372,8 @@ class GhostwriterApp(App[None]):
         else:
             self._refresh_attachment_table()
         self.action_refresh_targets()
+        if not self.is_headless:
+            self.run_worker(self._clear_legacy_image_cache(), group="cache-cleanup")
         if self.config.rewrite.keep_rpc_warm and not self.is_headless:
             self.run_worker(self._warm_rewrite_rpc(), exclusive=True, group="rewrite-warmup")
         for path in self.initial_paths:
@@ -384,6 +386,9 @@ class GhostwriterApp(App[None]):
     async def on_unmount(self) -> None:
         self.store.save(self.draft)
         await self.rewrite_rpc.close()
+
+    async def _clear_legacy_image_cache(self) -> None:
+        await asyncio.to_thread(clear_legacy_image_cache)
 
     async def _warm_rewrite_rpc(self) -> None:
         try:
@@ -469,8 +474,7 @@ class GhostwriterApp(App[None]):
             raise ValueError(f"Already attached: {source}")
 
         kind = "image" if looks_like_image(source) else "file"
-        injected = self.image_cache.stage(source) if kind == "image" else source
-        attachment = Attachment(kind=kind, source_path=str(source), injected_path=str(injected))
+        attachment = Attachment(kind=kind, source_path=str(source))
         if any(item.editor_token == attachment.editor_token for item in self.draft.attachments):
             raise ValueError(f"An attachment named {source.name!r} is already present")
 
@@ -865,8 +869,8 @@ class GhostwriterApp(App[None]):
 
         path.display = True
         path.update(str(attachment.source))
-        if attachment.kind == "image" and attachment.injected.exists():
-            image.image = attachment.injected
+        if attachment.kind == "image" and attachment.source.exists():
+            image.image = attachment.source
             image.display = True
             message.display = False
             return

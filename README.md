@@ -8,7 +8,7 @@ The name is literal and a Ghostty nod: it writes into another terminal editor wi
 
 The composer uses Python and [Textual](https://textual.textualize.io/) because its editor already provides reliable mouse cursor placement, drag selection, clipboard operations, undo/redo, and responsive terminal layout. Rebuilding that interaction layer in Rust would add substantial terminal-specific code without improving the local Unix-socket bridge.
 
-The Pi bridge is TypeScript because Pi extensions run natively in TypeScript. Runtime work is deliberately small: the app does no per-keystroke disk writes, target discovery reads a tiny registry, image hashing streams in 1 MiB chunks, and injection is one asynchronous local socket exchange.
+The Pi bridge is TypeScript because Pi extensions run natively in TypeScript. Runtime work is deliberately small: the app does no per-keystroke disk writes, target discovery reads a tiny registry, attachments keep their original paths, and injection is one asynchronous local socket exchange.
 
 The project has its own uv-managed `.venv`; it does not use the base Python environment.
 
@@ -23,7 +23,7 @@ The project has its own uv-managed `.venv`; it does not use the base Python envi
 - Translation, tidying, and iterative revision through one isolated, app-lifetime Pi RPC process
 - JSON-configured rewrite agents, target languages, warm-up behavior, and prompt template
 - Strict local placeholder restoration that keeps attachment details away from the rewrite model
-- Persistent draft and content-addressed image cache
+- Persistent draft with zero-copy attachments
 - Discovery of multiple running Pi instances
 - Whole-editor replacement with revision and target validation
 - No synthetic typing or automatic submission
@@ -96,7 +96,9 @@ File references are serialized using Pi's conventions:
 @"directory with spaces/example.ts"
 ```
 
-Ghostwriter presents every file through the same attachment interface. Internally, image formats are validated and copied once to a content-addressed cache so Pi receives the same persistent image paths as before. The draft is stored under the platform state directory; cached images are under the platform cache directory.
+Ghostwriter presents every file through the same attachment interface and keeps only its original path. Files and images are never copied or hashed. Both are injected as Pi `@` references, and Pi's `read` tool identifies supported images from their content when it opens them. Ghostwriter still records whether a path looks like an image only to choose its local preview widget. The draft is stored under the platform state directory.
+
+Versions using draft schemas 1 and 2 created persistent image copies under the platform cache directory. The current app removes that legacy `images` directory in a background startup task; it does not create a replacement attachment cache.
 
 Drag files directly into the prompt, select **Attach** to open the native multi-file picker, or type `@` to search the selected Pi session's working directory recursively. Absolute paths and `~` paths are also completed. Every route inserts the same compact `@filename` marker and adds the same filename-only row to Attachments. Pi serialization replaces the display marker in place with Pi's actual file or image reference.
 

@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from .model import Attachment, Draft
+from .model import Draft
 
 DEFAULT_RUNTIME_DIR = Path.home() / ".pi" / "agent" / "run" / "ghostwriter"
 MAX_DRAFT_BYTES = 4 * 1024 * 1024
@@ -84,17 +84,11 @@ def format_file_reference(path: Path, cwd: Path) -> str:
     return f'@"{value}"' if any(character.isspace() for character in value) else f"@{value}"
 
 
-def _serialize_attachment(attachment: Attachment, cwd: Path) -> str:
-    if attachment.kind == "file":
-        return format_file_reference(attachment.injected, cwd)
-    return attachment.injected.expanduser().resolve().as_posix()
-
-
 def serialize_draft(draft: Draft, cwd: Path) -> str:
     text = draft.text.rstrip()
     orphaned_references: list[str] = []
     for attachment in draft.attachments:
-        reference = _serialize_attachment(attachment, cwd)
+        reference = format_file_reference(attachment.source, cwd)
         if attachment.editor_token in text:
             text = text.replace(attachment.editor_token, reference)
         else:

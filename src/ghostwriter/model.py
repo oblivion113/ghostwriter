@@ -12,16 +12,11 @@ AttachmentKind = Literal["file", "image"]
 class Attachment:
     kind: AttachmentKind
     source_path: str
-    injected_path: str
     id: str = field(default_factory=lambda: uuid4().hex)
 
     @property
     def source(self) -> Path:
         return Path(self.source_path)
-
-    @property
-    def injected(self) -> Path:
-        return Path(self.injected_path)
 
     @property
     def editor_token(self) -> str:
@@ -43,7 +38,6 @@ class Attachment:
         return cls(
             kind=kind,
             source_path=data["source_path"],
-            injected_path=data["injected_path"],
             id=data.get("id") or uuid4().hex,
         )
 
@@ -57,7 +51,7 @@ class Draft:
 
     def to_dict(self) -> dict[str, object]:
         return {
-            "version": 2,
+            "version": 3,
             "id": self.id,
             "revision": self.revision,
             "text": self.text,
