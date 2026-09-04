@@ -4,7 +4,7 @@ import asyncio
 import re
 from collections.abc import Callable, Iterable
 from pathlib import Path
-from typing import ClassVar
+from typing import ClassVar, Literal
 
 from rich.style import Style
 from rich.text import Text
@@ -43,7 +43,7 @@ from .files import (
     read_text_preview,
 )
 from .model import Attachment
-from .pi import PiBridgeClient, PiTarget
+from .pi import PiBridgeClient, PiSkill, PiTarget
 from .rewrite import (
     PiRpcError,
     PiRpcSession,
@@ -54,6 +54,10 @@ from .rewrite import (
 from .rewrite.screens import RewriteConfigScreen, RewriteReviewScreen
 from .storage import DraftStore, clear_legacy_image_cache
 from .wrapping import NaturalWrappedDocument
+
+SKILL_TOKEN_PATTERN = re.compile(r"(?<!\S)/skill:[a-z0-9-]+(?=$|\s)")
+SKILL_COMPLETION_PATTERN = re.compile(r"(?<!\S)/skill(?::([^\s]*))?$")
+FILE_COMPLETION_PATTERN = re.compile(r"(?<!\S)@(.*)$")
 
 
 class DragHandle(Static):
@@ -103,7 +107,10 @@ class DragHandle(Static):
 
 
 class PromptTextArea(TextArea):
-    COMPONENT_CLASSES = TextArea.COMPONENT_CLASSES | {"prompt-attachment"}
+    COMPONENT_CLASSES = TextArea.COMPONENT_CLASSES | {
+        "prompt-attachment",
+        "prompt-skill",
+    }
 
     def __init__(self, *args: object, **kwargs: object) -> None:
         super().__init__(*args, **kwargs)
@@ -135,6 +142,10 @@ class PromptTextArea(TextArea):
             while (index := line.plain.find(token, start)) >= 0:
                 line.stylize(attachment_style, index, index + len(token))
                 start = index + len(token)
+
+        skill_style = self.get_component_rich_style("prompt-skill")
+        for match in SKILL_TOKEN_PATTERN.finditer(line.plain):
+            line.stylize(skill_style, match.start(), match.end())
         return line
 
     def _on_paste(self, event: events.Paste) -> None:
@@ -214,7 +225,8 @@ class GhostwriterApp(App[None]):
             prompt=rewrite_config.prompt,
         )
         self.rewrite_rpc = PiRpcSession()
-        self._completion_candidates: list[FileCompletion] = []
+        self._completion_candidates: list[FileCompletion | PiSkill] = []
+        self._completion_kind: Literal["file", "skill"] | None = None
         self._file_index_root: Path | None = None
         self._file_index: list[str] = []
         self._stacked = False
@@ -266,9 +278,9 @@ class GhostwriterApp(App[None]):
                         id="prompt-editor",
                         soft_wrap=True,
                         show_line_numbers=False,
-                        placeholder="Compose here, drag files, or type @ to attach…",
+                        placeholder="Compose here, type @ to attach, or /skill: to add a skill…",
                     )
-                    yield OptionList(id="file-completions", markup=False, compact=True)
+                    yield OptionList(id="prompt-completions", markup=False, compact=True)
                 yield DragHandle(id="height-handle")
                 with Horizontal(id="actions"):
                     yield Button(
@@ -359,7 +371,7 @@ class GhostwriterApp(App[None]):
         self._prompt_editor = self.query_one("#prompt-editor", TextArea)
         table = self.query_one("#attachments", DataTable)
         table.add_column("Attachment")
-        self.query_one("#file-completions", OptionList).display = False
+        self.query_one("#prompt-completions", OptionList).display = False
         self.query_one("#image-preview", Image).display = False
         self.query_one("#text-preview", TextArea).display = False
         self.query_one("#preview-path", Static).display = False
@@ -533,25 +545,46 @@ class GhostwriterApp(App[None]):
         root = target.cwd if target is not None else Path.cwd()
         return root.expanduser().resolve()
 
-    def _completion_context(self) -> tuple[str, tuple[int, int], tuple[int, int]] | None:
+    def _file_completion_context(
+        self,
+    ) -> tuple[str, tuple[int, int], tuple[int, int]] | None:
         editor = self.query_one("#prompt-editor", TextArea)
         row, column = editor.cursor_location
         if row >= editor.document.line_count:
             return None
         before_cursor = editor.document.get_line(row)[:column]
-        match = re.search(r"(?<!\S)@(.*)$", before_cursor)
+        match = FILE_COMPLETION_PATTERN.search(before_cursor)
         if match is None:
             return None
         return match.group(1), (row, match.start()), (row, column)
 
+    def _skill_completion_context(
+        self,
+    ) -> tuple[str, tuple[int, int], tuple[int, int]] | None:
+        editor = self.query_one("#prompt-editor", TextArea)
+        row, column = editor.cursor_location
+        if row >= editor.document.line_count:
+            return None
+        before_cursor = editor.document.get_line(row)[:column]
+        match = SKILL_COMPLETION_PATTERN.search(before_cursor)
+        if match is None:
+            return None
+        return (match.group(1) or ""), (row, match.start()), (row, column)
+
+    def _update_completions(self) -> None:
+        if self._skill_completion_context() is not None:
+            self._update_skill_completions()
+        else:
+            self._update_file_completions()
+
     def _update_file_completions(self) -> None:
-        context = self._completion_context()
+        context = self._file_completion_context()
         if context is None:
-            self._hide_file_completions()
+            self._hide_completions()
             return
         query, _, _ = context
         if any(attachment.editor_token == f"@{query}" for attachment in self.draft.attachments):
-            self._hide_file_completions()
+            self._hide_completions()
             return
 
         root = self._project_root()
@@ -573,26 +606,68 @@ class GhostwriterApp(App[None]):
             use_global_fzf_options=search.use_global_fzf_options,
         )
         if not candidates:
-            self._hide_file_completions()
+            self._hide_completions()
             return
 
         self._completion_candidates = candidates
-        options = self.query_one("#file-completions", OptionList)
+        self._completion_kind = "file"
+        options = self.query_one("#prompt-completions", OptionList)
         options.clear_options()
-        options.add_options(Option(candidate.label, id=str(index)) for index, candidate in enumerate(candidates))
+        options.add_options(
+            Option(candidate.label, id=str(index))
+            for index, candidate in enumerate(candidates)
+        )
+        options.styles.height = 8
         options.highlighted = 0
         options.display = True
 
-    def _hide_file_completions(self) -> None:
+    def _update_skill_completions(self) -> None:
+        context = self._skill_completion_context()
+        target = self._selected_target()
+        if context is None or target is None:
+            self._hide_completions()
+            return
+        query, _, _ = context
+        lowered = query.casefold()
+        candidates = [
+            skill for skill in target.skills if skill.name.casefold().startswith(lowered)
+        ]
+        if not candidates:
+            candidates = [skill for skill in target.skills if lowered in skill.name.casefold()]
+        if not candidates:
+            self._hide_completions()
+            return
+
+        visible_candidates = candidates[:12]
+        self._completion_candidates = list(visible_candidates)
+        self._completion_kind = "skill"
+        options = self.query_one("#prompt-completions", OptionList)
+        options.clear_options()
+        skill_options: list[Option] = []
+        for index, skill in enumerate(visible_candidates):
+            prompt = Text(no_wrap=True, overflow="ellipsis")
+            prompt.append(skill.token, style=Style(bold=True))
+            description = " ".join(skill.description.split())
+            if description:
+                prompt.append("\n")
+                prompt.append(description, style=Style(dim=True))
+            skill_options.append(Option(prompt, id=str(index)))
+        options.add_options(skill_options)
+        options.styles.height = 8
+        options.highlighted = 0
+        options.display = True
+
+    def _hide_completions(self) -> None:
         self._completion_candidates = []
-        self.query_one("#file-completions", OptionList).display = False
+        self._completion_kind = None
+        self.query_one("#prompt-completions", OptionList).display = False
 
     def _handle_completion_key(self, key: str) -> bool:
-        options = self.query_one("#file-completions", OptionList)
+        options = self.query_one("#prompt-completions", OptionList)
         if not options.display or not self._completion_candidates:
             return False
         if key == "tab":
-            self._accept_file_completion(options.highlighted or 0)
+            self._accept_completion(options.highlighted or 0)
         elif key == "down":
             current = options.highlighted or 0
             options.highlighted = (current + 1) % len(self._completion_candidates)
@@ -600,20 +675,26 @@ class GhostwriterApp(App[None]):
             current = options.highlighted or 0
             options.highlighted = (current - 1) % len(self._completion_candidates)
         elif key == "escape":
-            self._hide_file_completions()
+            self._hide_completions()
         else:
             return False
         return True
 
+    def _accept_completion(self, index: int) -> None:
+        if self._completion_kind == "file":
+            self._accept_file_completion(index)
+        elif self._completion_kind == "skill":
+            self._accept_skill_completion(index)
+
     def _accept_file_completion(self, index: int) -> None:
         if index < 0 or index >= len(self._completion_candidates):
             return
-        context = self._completion_context()
-        if context is None:
-            self._hide_file_completions()
+        candidate = self._completion_candidates[index]
+        context = self._file_completion_context()
+        if context is None or not isinstance(candidate, FileCompletion):
+            self._hide_completions()
             return
         _, start, end = context
-        candidate = self._completion_candidates[index]
         editor = self.query_one("#prompt-editor", TextArea)
         replacement = f"@{candidate.label}" if candidate.is_directory else ""
         result = editor.replace(replacement, start, end, maintain_selection_offset=False)
@@ -621,11 +702,34 @@ class GhostwriterApp(App[None]):
         if candidate.is_directory:
             self._update_file_completions()
         else:
-            self._hide_file_completions()
+            self._hide_completions()
             try:
                 self._add_attachment(candidate.path)
             except (OSError, ValueError) as error:
                 self.notify(str(error), severity="error")
+        editor.focus()
+
+    def _accept_skill_completion(self, index: int) -> None:
+        if index < 0 or index >= len(self._completion_candidates):
+            return
+        candidate = self._completion_candidates[index]
+        context = self._skill_completion_context()
+        if context is None or not isinstance(candidate, PiSkill):
+            self._hide_completions()
+            return
+        _, start, end = context
+        editor = self.query_one("#prompt-editor", TextArea)
+        row, column = end
+        line = editor.document.get_line(row)
+        suffix = "" if column < len(line) and line[column].isspace() else " "
+        result = editor.replace(
+            f"{candidate.token}{suffix}",
+            start,
+            end,
+            maintain_selection_offset=False,
+        )
+        editor.move_cursor(result.end_location)
+        self._hide_completions()
         editor.focus()
 
     def _apply_split(self) -> None:
@@ -788,6 +892,7 @@ class GhostwriterApp(App[None]):
             self.selected_target_id = None
         count = len(self.targets)
         self._set_status(f"Found {count} Pi target{'s' if count != 1 else ''}")
+        self._update_completions()
 
     def action_save(self) -> None:
         self._save()
@@ -820,17 +925,18 @@ class GhostwriterApp(App[None]):
             self._set_status(f"Removed {count} unreferenced attachment{'s' if count != 1 else ''}")
         else:
             self._set_status("Draft modified")
-        self._update_file_completions()
+        self._update_completions()
 
-    @on(OptionList.OptionSelected, "#file-completions")
-    def file_completion_selected(self, event: OptionList.OptionSelected) -> None:
-        self._accept_file_completion(event.option_index)
+    @on(OptionList.OptionSelected, "#prompt-completions")
+    def completion_selected(self, event: OptionList.OptionSelected) -> None:
+        self._accept_completion(event.option_index)
 
     @on(Select.Changed, "#target")
     def target_changed(self, event: Select.Changed) -> None:
         target_id = None if event.value is Select.NULL else str(event.value)
         self.selected_target_id = target_id if target_id in self.targets else None
         self._file_index_root = None
+        self._update_completions()
 
     @on(DataTable.RowHighlighted, "#attachments")
     def attachment_highlighted(self, event: DataTable.RowHighlighted) -> None:

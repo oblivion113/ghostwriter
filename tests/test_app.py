@@ -12,7 +12,7 @@ from textual.widgets._select import InvalidSelectValueError
 
 from ghostwriter.app import CurrentThemeProvider, GhostwriterApp
 from ghostwriter.model import Draft
-from ghostwriter.pi import PiTarget
+from ghostwriter.pi import PiSkill, PiTarget
 from ghostwriter.storage import DraftStore
 
 
@@ -230,6 +230,51 @@ async def test_narrow_side_pane_scrolls_to_hidden_controls(tmp_path: Path) -> No
 
 
 @pytest.mark.asyncio
+async def test_skill_completion_works_mid_prompt_and_styles_inserted_token(tmp_path: Path) -> None:
+    target = PiTarget(
+        pid=42,
+        session_id="abcdef123456",
+        cwd=tmp_path,
+        socket_path=tmp_path / "pi.sock",
+        skills=(
+            PiSkill("blueprint", "Explains why a codebase works well.\nUse for analysis."),
+            PiSkill("teaching", "Explains concepts for beginners."),
+        ),
+    )
+    app = GhostwriterApp()
+    app.draft = Draft(text="")
+    app.store = DraftStore(tmp_path / "draft.json")
+    app.pi.discover_targets = lambda: [target]  # type: ignore[method-assign]
+
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+        editor = app.query_one("#prompt-editor")
+        editor.load_text("Explain this first, then /skill:blue")
+        editor.cursor_location = (0, len(editor.text))
+        app._update_completions()
+
+        options = app.query_one("#prompt-completions")
+        assert options.display
+        assert options.option_count == 1
+        assert options.options[0].prompt.plain == (
+            "/skill:blueprint\nExplains why a codebase works well. Use for analysis."
+        )
+        assert app._handle_completion_key("tab")
+        await pilot.pause()
+
+        assert editor.text == "Explain this first, then /skill:blueprint "
+        rendered_line = editor.get_line(0)
+        skill_spans = [
+            span
+            for span in rendered_line.spans
+            if rendered_line.plain[span.start : span.end] == "/skill:blueprint"
+        ]
+        assert skill_spans
+        assert skill_spans[0].style.bold
+        assert skill_spans[0].style.color is not None
+
+
+@pytest.mark.asyncio
 async def test_at_completion_attaches_project_file_with_compact_marker(tmp_path: Path) -> None:
     source = tmp_path / "src" / "context.md"
     source.parent.mkdir()
@@ -245,7 +290,7 @@ async def test_at_completion_attaches_project_file_with_compact_marker(tmp_path:
         editor.cursor_location = (0, len(editor.text))
         app._update_file_completions()
 
-        assert app.query_one("#file-completions").display
+        assert app.query_one("#prompt-completions").display
         assert app._handle_completion_key("tab")
         await pilot.pause()
 

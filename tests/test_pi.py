@@ -37,6 +37,12 @@ def test_serialize_draft_uses_original_paths_for_files_and_images(tmp_path: Path
     )
 
 
+def test_skill_invocation_is_preserved_during_serialization(tmp_path: Path) -> None:
+    text = "Explain this, then use /skill:teaching for the example."
+
+    assert serialize_draft(Draft(text=text), tmp_path) == text
+
+
 def test_inline_attachment_token_is_replaced_in_place(tmp_path: Path) -> None:
     source = tmp_path / "context.md"
     attachment = Attachment("file", str(source), id="inline123456789")
@@ -94,6 +100,10 @@ async def test_pi_bridge_discovers_and_injects(tmp_path: Path) -> None:
         "modelProvider": "anthropic",
         "modelId": "claude-sonnet",
         "thinkingLevel": "high",
+        "skills": [
+            {"name": "blueprint", "description": "Analyze standout codebases"},
+            {"name": "teaching", "description": "Explain concepts"},
+        ],
         "startedAt": "2026-01-01T00:00:00Z",
     }
     (tmp_path / "pi.json").write_text(json.dumps(registry), encoding="utf-8")
@@ -103,6 +113,11 @@ async def test_pi_bridge_discovers_and_injects(tmp_path: Path) -> None:
         targets = client.discover_targets()
         assert len(targets) == 1
         assert targets[0].model_name == "anthropic/claude-sonnet"
+        assert [skill.token for skill in targets[0].skills] == [
+            "/skill:blueprint",
+            "/skill:teaching",
+        ]
+        assert targets[0].skills[0].description == "Analyze standout codebases"
 
         response = await client.inject(
             targets[0],

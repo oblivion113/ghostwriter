@@ -24,6 +24,7 @@ type DraftRequest = {
 };
 
 type AppliedRevision = { revision: number; sha256: string };
+type PublishedSkill = { name: string; description: string };
 
 function reply(socket: Socket, message: object): void {
   if (!socket.destroyed) socket.end(`${JSON.stringify(message)}\n`);
@@ -58,8 +59,19 @@ export default function ghostwriterBridge(pi: ExtensionAPI): void {
   let activeContext: ExtensionContext | undefined;
   let startedAt: string | undefined;
   let registryWrites = Promise.resolve();
+  let skillRefreshTimer: ReturnType<typeof setTimeout> | undefined;
   let forceEditorRender: (() => void) | undefined;
   const applied = new Map<string, AppliedRevision>();
+
+  function getPublishedSkills(): PublishedSkill[] {
+    return pi
+      .getCommands()
+      .filter((command) => command.source === "skill" && command.name.startsWith("skill:"))
+      .map((command) => ({
+        name: command.name.slice("skill:".length),
+        description: command.description ?? "",
+      }));
+  }
 
   async function removeRuntimeFiles(): Promise<void> {
     await Promise.all([
@@ -71,6 +83,10 @@ export default function ghostwriterBridge(pi: ExtensionAPI): void {
   async function stop(): Promise<void> {
     const previousContext = activeContext;
     activeContext = undefined;
+    if (skillRefreshTimer !== undefined) {
+      clearTimeout(skillRefreshTimer);
+      skillRefreshTimer = undefined;
+    }
     forceEditorRender = undefined;
     previousContext?.ui.setWidget(RENDER_HOOK_KEY, undefined);
     const current = server;
@@ -100,6 +116,7 @@ export default function ghostwriterBridge(pi: ExtensionAPI): void {
       modelProvider: ctx.model?.provider,
       modelId: ctx.model?.id,
       thinkingLevel: ctx.thinkingLevel,
+      skills: getPublishedSkills(),
       startedAt,
       updatedAt: new Date().toISOString(),
     };
@@ -229,6 +246,15 @@ export default function ghostwriterBridge(pi: ExtensionAPI): void {
     });
     await chmod(socketPath, 0o600);
     await writeRegistry(ctx);
+  });
+
+  pi.on("resources_discover", (_event, ctx) => {
+    if (skillRefreshTimer !== undefined) clearTimeout(skillRefreshTimer);
+    // Pi applies extension-contributed resource paths after all discovery handlers return.
+    skillRefreshTimer = setTimeout(() => {
+      skillRefreshTimer = undefined;
+      void writeRegistry(ctx).catch(() => undefined);
+    }, 0);
   });
 
   pi.on("session_info_changed", async (_event, ctx) => {

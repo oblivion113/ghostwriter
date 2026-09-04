@@ -15,6 +15,16 @@ MAX_DRAFT_BYTES = 4 * 1024 * 1024
 
 
 @dataclass(frozen=True, slots=True)
+class PiSkill:
+    name: str
+    description: str = ""
+
+    @property
+    def token(self) -> str:
+        return f"/skill:{self.name}"
+
+
+@dataclass(frozen=True, slots=True)
 class PiTarget:
     pid: int
     session_id: str
@@ -25,6 +35,7 @@ class PiTarget:
     thinking_level: str = ""
     session_name: str | None = None
     started_at: str = ""
+    skills: tuple[PiSkill, ...] = ()
 
     @property
     def selection_id(self) -> str:
@@ -136,6 +147,17 @@ class PiBridgeClient:
                 stale_socket = socket_path
                 if not self._process_is_alive(pid) or not socket_path.exists():
                     raise ProcessLookupError
+                raw_skills = data.get("skills", [])
+                skills = tuple(
+                    PiSkill(
+                        name=str(item["name"]),
+                        description=str(item.get("description", "")),
+                    )
+                    for item in raw_skills
+                    if isinstance(item, dict)
+                    and isinstance(item.get("name"), str)
+                    and item["name"]
+                )
                 targets.append(
                     PiTarget(
                         pid=pid,
@@ -147,6 +169,7 @@ class PiBridgeClient:
                         model_id=str(data.get("modelId", "")),
                         thinking_level=str(data.get("thinkingLevel", "")),
                         started_at=str(data.get("startedAt", "")),
+                        skills=skills,
                     )
                 )
             except (OSError, KeyError, TypeError, ValueError, json.JSONDecodeError, ProcessLookupError):

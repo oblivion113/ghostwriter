@@ -1,187 +1,132 @@
 # Ghostwriter
 
-A standalone terminal prompt composer that replaces the unsent editor text in a running Pi TUI. It never submits the prompt: final review, editing, and submission stay inside Pi.
+### A comfortable drafting space for Pi
 
-The name is literal and a Ghostty nod: it writes into another terminal editor without impersonating keyboard input.
+Ghostwriter gives you a mouse-friendly terminal editor for prompts that are awkward to compose directly in Pi: long instructions, several attachments, inline Skill references, or prose that needs a quick translation or cleanup.
 
-## Why Python + TypeScript
+When the draft is ready, Ghostwriter replaces the unsent text in the Pi session you choose. **It never submits the prompt.** You still review it and press Enter in Pi.
 
-The composer uses Python and [Textual](https://textual.textualize.io/) because its editor already provides reliable mouse cursor placement, drag selection, clipboard operations, undo/redo, and responsive terminal layout. Rebuilding that interaction layer in Rust would add substantial terminal-specific code without improving the local Unix-socket bridge.
+```text
+Compose in Ghostwriter  ── Ctrl+Enter ──▶  Review in Pi  ── Enter ──▶  Agent
+```
 
-The Pi bridge is TypeScript because Pi extensions run natively in TypeScript. Runtime work is deliberately small: the app does no per-keystroke disk writes, target discovery reads a tiny registry, attachments keep their original paths, and injection is one asynchronous local socket exchange.
+| Compose comfortably | Bring the right context | Stay in control |
+| --- | --- | --- |
+| Mouse editing, selection, clipboard, undo/redo, soft wrapping, and persistent drafts | Drag files, preview images and text, search with `@`, and complete `/skill:<name>` anywhere | Local socket injection replaces only unsent editor text; no synthetic typing and no automatic submission |
 
-The project has its own uv-managed `.venv`; it does not use the base Python environment.
+## Quick start
 
-## Features
-
-- Mouse editing and drag selection in a multiline prompt editor
-- Normal copy, cut, paste, undo, and redo
-- Unified attachments from drag-and-drop, the native picker, or `@` autocomplete
-- Compact `@filename` markers regardless of how a file was attached
-- Raw text preview for source code, Markdown, scripts, and other UTF-8 files
-- Ghostty-compatible image preview with Unicode fallback
-- Translation, tidying, and iterative revision through one isolated, app-lifetime Pi RPC process
-- JSON-configured rewrite agents, target languages, warm-up behavior, and prompt template
-- Strict local placeholder restoration that keeps attachment details away from the rewrite model
-- Persistent draft with zero-copy attachments
-- Discovery of multiple running Pi instances
-- Whole-editor replacement with revision and target validation
-- No synthetic typing or automatic submission
-- A deliberately Pi-only bridge with no unused adapter abstraction
-
-## Setup
-
-Requirements: Python 3.12+, [uv](https://docs.astral.sh/uv/), Node.js/npm, and Pi 0.84.4 or a compatible release.
+Ghostwriter requires Python 3.12+, [uv](https://docs.astral.sh/uv/), Node.js/npm, and Pi 0.84.4 or a compatible release.
 
 ```bash
-git clone <repository-url> ghostwriter
+git clone https://github.com/oblivion113/ghostwriter.git
 cd ghostwriter
 ./scripts/setup
 ```
 
-The setup script installs locked Python and TypeScript dependencies, builds both packages, installs the `ghostwriter` command, and registers this repository through Pi's package manager. Restart Pi or run `/reload` afterward.
-
-Start the composer in another terminal pane:
+`setup` installs the local command and registers the Pi extension, so it changes your user-level Pi settings. Restart Pi or run `/reload`, then open Ghostwriter in another terminal pane:
 
 ```bash
 ghostwriter
 ```
 
-The Pi command `/ghostwriter-status` shows that session's name, working directory, model, thinking level, and PID.
+Choose a running Pi session, write your prompt, and press `Ctrl+Enter`. Ghostwriter transfers the draft to Pi for final review.
 
-Contributors who do not want user-level installation can instead run:
-
-```bash
-uv sync --dev
-npm ci
-uv run ghostwriter
-```
-
-You may attach paths at startup:
+You can also start with attachments:
 
 ```bash
-uv run ghostwriter ./spec.md ./screenshot.png
+ghostwriter ./spec.md ./screenshot.png
 ```
 
-## Workflow
+For a development-only checkout that does not install the command or modify Pi settings, follow [`docs/development.md`](docs/development.md).
 
-1. Start or reload Pi with the bridge installed.
-2. Start Ghostwriter in a separate pane.
-3. Choose the Pi target.
-4. Compose the prompt and attach files or images.
-5. Press `Ctrl+Enter` or select **Inject into Pi**.
-6. Review and submit from Pi's normal input box.
+## Writing with context
 
-A later injection replaces the entire unsent Pi draft again.
+### Attachments
 
-### Keys
+Drag files into the editor, choose **Attach**, paste a local path, or type `@` to search the selected Pi project's files. Every route creates the same compact marker, such as `@design.md`.
 
-| Key | Action |
-| --- | --- |
-| `Ctrl+Enter` | Inject into selected target |
-| `Ctrl+O` | Choose one or more files |
-| `Ctrl+R` | Refresh targets |
-| `Ctrl+S` | Save draft |
-| `F4` | Translate / tidy the draft with Pi RPC |
-| `Ctrl+Q` | Quit |
-
-Text editing, selection, clipboard, and history keys come from Textual's `TextArea`. While an `@` completion menu is open, use Up/Down to choose, Tab to attach, and Escape to close it.
-
-## Attachments
-
-File references are serialized using Pi's conventions:
+Ghostwriter keeps the original file in place rather than copying it. Text and images can be previewed locally; at injection time the marker becomes Pi's normal file syntax:
 
 ```text
 @src/example.ts
-@"directory with spaces/example.ts"
+@"notes/design brief.md"
 ```
 
-Ghostwriter presents every file through the same attachment interface and keeps only its original path. Files and images are never copied or hashed. Both are injected as Pi `@` references, and Pi's `read` tool identifies supported images from their content when it opens them. Ghostwriter still records whether a path looks like an image only to choose its local preview widget. The draft is stored under the platform state directory.
+Deleting the final marker removes the attachment automatically. You can also select it in the Attachments pane and choose **Remove**.
 
-Versions using draft schemas 1 and 2 created persistent image copies under the platform cache directory. The current app removes that legacy `images` directory in a background startup task; it does not create a replacement attachment cache.
+`fd` and `fzf` improve indexing and fuzzy ranking when installed, but neither is required. A bounded Python fallback is always available.
 
-Drag files directly into the prompt, select **Attach** to open the native multi-file picker, or type `@` to search the selected Pi session's working directory recursively. Absolute paths and `~` paths are also completed. Every route inserts the same compact `@filename` marker and adds the same filename-only row to Attachments. Pi serialization replaces the display marker in place with Pi's actual file or image reference.
+### Skills
 
-When available, `fd` builds the bounded project index and `fzf` ranks fuzzy matches without opening a second terminal UI. Both tools remain optional: the Python fallback excludes hidden files and common cache, dependency, and build directories. Project ignore files are respected by `fd`, and additional exclusions are configurable.
-
-Selecting an attachment previews images visually and displays UTF-8 files—including source code, scripts, tests, and Markdown—as raw text. Plain prompt text stays white across every available theme, while attached `@filename` markers use a distinct blue style. Binary and oversized files are handled safely; large text previews are truncated.
-
-Deleting a marker from the prompt removes its unreferenced attachment automatically. Selecting an attachment and choosing **Remove** performs the inverse atomic operation: it removes the attachment and every matching marker from the prompt.
-
-## Translation and tidying
-
-Press `F4` to open the rewrite configuration. Select Translate, Tidy, a target language, and a configured rewrite agent, then choose **Run** or press `Ctrl+Enter`. Ghostwriter protects inline attachments with opaque placeholders and returns the result to a review dialog. You may accept, reject, directly edit, or provide revision feedback in the same RPC conversation.
-
-By default, Ghostwriter starts the tool-free Pi RPC process only when a rewrite begins and closes it after that workflow, minimizing idle memory use. Revisions within the workflow retain the current conversation. Set `rewrite.keepRpcWarm` to `true` to prewarm one background process at app startup and retain it across workflows; each workflow still receives a fresh Pi session.
-
-The accepted result returns to Ghostwriter—not Pi's visible editor. Attachment mappings, paths, and content remain local. Every placeholder is validated before restoration.
-
-### Configuration
-
-Ghostwriter creates one `config.json` in the platform user configuration directory on first start (on macOS, `~/Library/Application Support/ghostwriter/config.json`). It controls file search and rewrite choices:
-
-```json
-{
-  "version": 1,
-  "fileSearch": {
-    "includeHidden": false,
-    "useGlobalFzfOptions": true,
-    "ignoreFiles": [],
-    "fzfOptions": []
-  },
-  "rewrite": {
-    "keepRpcWarm": false,
-    "agents": [
-      { "provider": "agent-plan", "model": "ark-code-latest" },
-      { "provider": "anthropic", "model": "claude-haiku-4-5" }
-    ],
-    "targetLanguages": ["English", "Chinese (Simplified)", "French"],
-    "defaultTargetLanguage": "English",
-    "instructions": "",
-    "prompt": "Transform the draft under these requirements:\\n{instructions}\\n\\nDRAFT START\\n{text}\\nDRAFT END"
-  }
-}
-```
-
-Select **Open config** in the Rewrite dialog to launch this file with the desktop's default associated editor. Save your edits, return to Ghostwriter, and select **Reload config** before running the rewrite. Ghostwriter also reloads the file automatically whenever the Rewrite dialog opens, so changes made while the dialog was closed are immediately available.
-
-Customization rules:
-
-- `fileSearch.includeHidden` defaults to `false`. `skipDirectories` contains the generated/cache directory names omitted by both `fd` and Python indexing; edit the generated list to tune it.
-- `fileSearch.ignoreFiles` accepts extra gitignore-format files for `fd`. `useGlobalFzfOptions` inherits `FZF_DEFAULT_OPTS` and `FZF_DEFAULT_OPTS_FILE`; set it to `false` for app-only behavior, then place individual CLI arguments in `fzfOptions`.
-- Each agent is identified directly as `provider/model`; there is no separate name. Set both values to IDs recognized by Pi (`pi --list-models`), or leave both blank to offer Pi's default. The first array entry is the default agent.
-- `defaultTargetLanguage` must appear in `targetLanguages`.
-- Type extra standing rewrite directions in `instructions`; leave it as `""` when none are needed. `{instructions}` expands to the built-in Translate/Tidy rules followed by this value—no external prompt file is involved.
-- `{text}` is required in `prompt`. `{source_language}` and `{target_language}` expand to the chosen language values.
-- Keep the attachment-placeholder instruction when replacing the default prompt. Ghostwriter still validates placeholders locally, but clear model instructions avoid unnecessary repair requests.
-- JSON does not support comments. Use the field descriptions here rather than adding `//` or `#` lines to the file.
-
-An invalid manual reload is reported without overwriting the file, allowing you to correct it in the editor. An invalid file encountered during app startup is moved to `config.broken-<pid>.json` and replaced with safe defaults. The generated default prompt tells the model not to add headings to short, single-section drafts.
-
-See [`docs/rewrite.md`](docs/rewrite.md) for protocol and privacy details.
-
-## Layout
-
-Ghostwriter selects a side-by-side or stacked layout from both terminal width and aspect ratio. Its initial split always reserves space for the editor actions. Two mouse-draggable dividers resize the prompt independently: the outer divider changes editor width (or pane height when stacked), while the divider below the prompt changes its height. The current Pi session appears in a compact dropdown, which expands only when choosing another target. When no session is available, the control shows a disabled **No active Pi session** state rather than a selectable option. Prompt text soft-wraps to the available width and scrolls vertically without a horizontal scrollbar.
-
-The command palette deliberately omits Textual's SVG screenshot command. Theme selection is limited to six comfortable dark themes: Textual Dark, Nord, Gruvbox, Catppuccin Mocha, Tokyo Night, and Rosé Pine Moon.
-
-## Architecture
+Type `/skill` or `/skill:<partial-name>` after whitespace anywhere in your draft. Ghostwriter shows the Skills loaded by the selected Pi session, including a short description, and lets you complete the highlighted result with Tab or a click.
 
 ```text
-Textual UI ── PiBridgeClient ── Unix socket ── Pi extension
-     └────── RewriteSession ── isolated Pi RPC process
+First review the architecture, then use /skill:teaching for the explanation.
 ```
 
-`src/ghostwriter/pi.py` owns Pi target discovery, attachment serialization, and injection. `extensions/ghostwriter.ts` owns the Pi-side session registry and editor replacement.
+The inserted `/skill:<name>` remains ordinary prompt text and is highlighted for readability. There is no separate checkbox or preview. If Pi's Skills change, press `Ctrl+R` to refresh the selected target's metadata.
 
-Developer references:
+Pi expands a Skill command normally when it begins the submitted input and Skill commands are enabled. When it appears later in a sentence, the explicit syntax remains visible to the Agent so it can select the matching Skill instructions.
 
-- [`docs/architecture.md`](docs/architecture.md) — components, state, and end-to-end flows
-- [`docs/pi-bridge.md`](docs/pi-bridge.md) — self-contained Pi APIs, lifecycle, registry, and wire protocol
-- [`docs/rewrite.md`](docs/rewrite.md) — isolated RPC transformation and placeholder integrity
-- [`docs/development.md`](docs/development.md) — setup, build, tests, debugging, and releases
-- [`AGENTS.md`](AGENTS.md) — concise operational guidance for coding Agents
+## Rewrite before you send
+
+Press `F4` to translate, tidy, or revise the current draft with an isolated Pi RPC process. You can review the result, edit it directly, request another revision in the same workflow, or reject it and keep the original.
+
+Attachments stay private during rewriting. Ghostwriter replaces every attachment marker with an opaque placeholder, verifies that the model preserved each placeholder exactly once, and only then restores the local markers. Paths, filenames, and attachment contents are not sent to the rewrite model.
+
+The accepted rewrite returns to Ghostwriter. It reaches Pi only when you explicitly choose **Inject**.
+
+See [`docs/rewrite.md`](docs/rewrite.md) for isolation, placeholder integrity, and RPC lifecycle details.
+
+## Keyboard guide
+
+| Key | Action |
+| --- | --- |
+| `Ctrl+Enter` | Replace the selected Pi session's unsent editor text |
+| `Ctrl+O` | Choose one or more attachments |
+| `Ctrl+R` | Refresh Pi targets and their Skills |
+| `Ctrl+S` | Save the current draft |
+| `F4` | Open Translate / Tidy |
+| `Ctrl+Q` | Quit |
+| `Up` / `Down` | Move through an open completion list |
+| `Tab` | Accept the highlighted `@` or `/skill:` completion |
+| `Escape` | Close the completion list |
+
+Text editing, selection, clipboard, and history shortcuts come from Textual's `TextArea`.
+
+## Safety by design
+
+Ghostwriter has a deliberately narrow job: prepare a prompt and place it in Pi's editor.
+
+- **Review stays mandatory.** Injection never submits or starts an Agent turn.
+- **Communication stays local.** The bridge uses a user-only Unix socket, not a TCP port.
+- **Attachments stay zero-copy.** Ghostwriter references original files and does not upload, hash, or duplicate them.
+- **Targets are validated.** Session ID, working directory, revision, and request size are checked before replacement.
+- **Rewriting is isolated.** The RPC process has tools, extensions, Skills, prompt templates, and project context disabled.
+
+## Configuration
+
+Choose **Settings → Open config** to edit Ghostwriter's generated JSON configuration. It controls file search, rewrite models, target languages, standing instructions, custom prompts, and optional RPC warm-up. Reload it from Ghostwriter after saving.
+
+See [`docs/configuration.md`](docs/configuration.md) for the configuration format and examples.
+
+## Project guide
+
+| Document | Use it for |
+| --- | --- |
+| [`docs/configuration.md`](docs/configuration.md) | File search and rewrite settings |
+| [`docs/rewrite.md`](docs/rewrite.md) | Rewrite privacy, validation, and RPC behavior |
+| [`docs/architecture.md`](docs/architecture.md) | Components, state, and end-to-end data flow |
+| [`docs/pi-bridge.md`](docs/pi-bridge.md) | Pi APIs, runtime registry, and wire protocol |
+| [`docs/development.md`](docs/development.md) | Local setup, tests, debugging, releases, and uninstalling |
+| [`CONTRIBUTING.md`](CONTRIBUTING.md) | Contribution workflow and project invariants |
+
+## For Agents
+
+Read [`AGENTS.md`](AGENTS.md) first. It maps the repository, lists the verification commands, and records the invariants that must survive every change. Read `docs/pi-bridge.md` before changing Pi integration and `docs/architecture.md` before moving responsibilities between modules.
+
+The short version: preserve Ghostwriter's Pi-only scope, keep attachment data local during rewrites, and never turn editor replacement into submission.
 
 ## Development
 
@@ -190,11 +135,6 @@ Developer references:
 ./scripts/build
 ```
 
-See [`CONTRIBUTING.md`](CONTRIBUTING.md) before submitting changes.
+`check` runs TypeScript type checking, Ruff, and the full pytest suite. The Python UI lives under `src/ghostwriter/`; the Pi extension is `extensions/ghostwriter.ts`.
 
-Uninstall with:
-
-```bash
-./scripts/uninstall-pi-extension
-uv tool uninstall ghostwriter
-```
+Ghostwriter is licensed under the [MIT License](LICENSE).

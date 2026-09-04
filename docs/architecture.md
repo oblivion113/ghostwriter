@@ -5,8 +5,8 @@ Ghostwriter is one local application with two integration processes:
 ```text
 ┌──────────────────────── Python / Textual ────────────────────────┐
 │ Prompt editor ─ Draft/Attachments ─ PiBridgeClient               │
-│        │                  │                 │                     │
-│        └─ RewriteSession ─┴─ Pi RPC child   └─ Unix socket       │
+│        │                                 ├─ target skill metadata│
+│        └─ RewriteSession ─── Pi RPC child  └─ Unix socket        │
 └───────────────────────────────────────────────────────┬───────────┘
                                                         │
                                            TypeScript Pi extension
@@ -26,9 +26,9 @@ The Python application owns composition and local state. The TypeScript extensio
 | `src/ghostwriter/files.py` | Dragged-path parsing, native picker, recursive `@` index, and safe previews |
 | `src/ghostwriter/wrapping.py` | Incremental CJK-aware soft wrapping that preserves source text |
 | `src/ghostwriter/storage.py` | Atomic draft persistence and legacy image-cache cleanup |
-| `src/ghostwriter/pi.py` | Pi registry discovery, Pi attachment syntax, and socket exchange |
+| `src/ghostwriter/pi.py` | Pi registry and skill-metadata discovery, Pi attachment syntax, and socket exchange |
 | `src/ghostwriter/rewrite/` | Pi RPC process, rewrite prompts, review screens, and placeholder validation |
-| `extensions/ghostwriter.ts` | Pi package entry point, session registry, socket server, and status command |
+| `extensions/ghostwriter.ts` | Pi package entry point, session and skill registry, socket server, and status command |
 | `tests/` | UI behavior, persistence, serialization, protocol, and rewrite tests |
 
 The project is intentionally Pi-specific. `PiBridgeClient` is a concrete boundary rather than a generic adapter framework.
@@ -36,9 +36,9 @@ The project is intentionally Pi-specific. `PiBridgeClient` is a concrete boundar
 ## Main injection flow
 
 1. `GhostwriterApp` loads a versioned draft from `DraftStore`.
-2. Files enter through drag-and-drop, the native picker, startup arguments, or `@` completion.
-3. The editor displays a compact `@filename` marker while `Attachment` retains the original source path, preview kind, and stable ID.
-4. The selected `PiTarget` supplies the target working directory and socket.
+2. Files enter through drag-and-drop, the native picker, startup arguments, or `@` completion. Skill invocations enter as ordinary `/skill:<name>` text through target-aware completion.
+3. The editor displays compact, styled markers. `Attachment` retains file metadata, while skill invocations deliberately create no separate draft state.
+4. The selected `PiTarget` supplies the target working directory, socket, and Pi's loaded skill metadata.
 5. `serialize_draft()` replaces every display marker with the same Pi file-reference syntax: `@relative/path`, `@"path with spaces"`, or an absolute reference when the source is outside Pi's working directory.
 6. `PiBridgeClient.inject()` sends one bounded newline-delimited JSON request.
 7. The extension validates protocol version, session ID, working directory, draft revision, and request size.
@@ -57,9 +57,11 @@ The UI intentionally does not ask users to distinguish files from images. A suff
 
 Deleting the final display marker removes its attachment metadata. Removing an attachment from the table performs the inverse operation and deletes every matching marker.
 
-### File completion
+### Completion
 
-The selected Pi session's working directory is the project root. `files.py` prefers `fd` for a bounded 20,000-file index that respects project and configured ignore files. The retained index consists only of relative path strings; absolute `Path` objects are created for the small result set. `fzf --filter` performs path-aware fuzzy ranking, with a bounded-memory Python fallback when unavailable. Global fzf options are inherited unless disabled in `fileSearch`. Hidden files and common cache, dependency, and build directories are excluded by default. Queries beginning with `/` or `~` use direct filesystem completion. Tab accepts the highlighted candidate.
+The selected Pi session's working directory is the project root. `files.py` prefers `fd` for a bounded 20,000-file index that respects project and configured ignore files. The retained index consists only of relative path strings; absolute `Path` objects are created for the small result set. `fzf --filter` performs path-aware fuzzy ranking, with a bounded-memory Python fallback when unavailable. Global fzf options are inherited unless disabled in `fileSearch`. Hidden files and common cache, dependency, and build directories are excluded by default. Queries beginning with `/` or `~` use direct filesystem completion.
+
+The Pi extension obtains loaded skills from `pi.getCommands()` and publishes only each name and description in the target registry. Ghostwriter filters that small in-memory list when `/skill` or `/skill:<partial-name>` appears immediately before the cursor after whitespace, including in the middle of a larger prompt. Descriptions are normalized for a one-line secondary label; no skill document is opened. Tab accepts the highlighted file or skill candidate.
 
 ## Rewrite flow
 
@@ -79,7 +81,7 @@ No attachment path, filename, or content is sent to the rewrite model.
 
 Textual owns terminal rendering and input. Important custom behavior includes:
 
-- `PromptTextArea`: intercepts bracketed paste and Tab completion without re-running Textual's default handlers, soft-wraps prose, keeps it white across themes, and styles active attachment markers without changing their text;
+- `PromptTextArea`: intercepts bracketed paste and Tab completion without re-running Textual's default handlers, soft-wraps prose, keeps it white across themes, and styles attachment and `/skill:<name>` markers without changing their text;
 - `DragHandle`: captures mouse events directly for independent width and height resizing;
 - `Select`: shows only the current Pi target until its dropdown is opened and uses a disabled sentinel only when no target exists;
 - `VerticalScroll`: keeps the side pane reachable in constrained layouts;

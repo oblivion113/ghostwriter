@@ -4,6 +4,7 @@ All notable changes to Ghostwriter will be documented here. The project follows 
 
 ## Unreleased
 
+- Added target-aware `/skill:<name>` completion anywhere in the prompt, with Tab insertion, one-line descriptions, and highlighted skill tokens.
 - Reserved visible space for prompt actions in compact and stacked layouts.
 - Consolidated Pi target identity into one concise scrollable list.
 - Added unified JSON configuration for provider/model rewrite agents, languages, extra instructions, RPC warm-up, and custom prompts, with default-editor and live-reload controls.

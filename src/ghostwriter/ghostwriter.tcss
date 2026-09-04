@@ -105,7 +105,12 @@ PromptTextArea .prompt-attachment {
     text-style: bold;
 }
 
-#file-completions {
+PromptTextArea .prompt-skill {
+    color: $success;
+    text-style: bold;
+}
+
+#prompt-completions {
     height: 8;
     margin-top: 1;
     border: round #8d97a6;

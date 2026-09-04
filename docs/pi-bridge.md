@@ -43,11 +43,13 @@ Only the following Pi surface is required:
 | --- | --- |
 | `getAgentDir()` | Resolve Pi's agent configuration/runtime root |
 | `pi.on("session_start", handler)` | Start registry and socket resources for an interactive session |
+| `pi.on("resources_discover", handler)` | Refresh skill metadata after extension resources are applied |
 | `pi.on("session_shutdown", handler)` | Close the server and remove runtime files |
 | `pi.on("session_info_changed", handler)` | Refresh the optional session display name |
 | `pi.on("model_select", handler)` | Refresh provider and model metadata |
 | `pi.on("thinking_level_select", handler)` | Refresh thinking-level metadata |
 | `pi.registerCommand(name, definition)` | Register `/ghostwriter-status` |
+| `pi.getCommands()` | Publish the loaded `source: "skill"` commands for target-aware completion |
 | `ctx.mode` | Restrict the bridge to interactive `"tui"` sessions |
 | `ctx.cwd` | Identify the session working directory |
 | `ctx.model` | Read active provider and model IDs |
@@ -91,12 +93,20 @@ Registry files are local discovery records, not a remote API. A representative r
   "modelProvider": "openai-codex",
   "modelId": "gpt-5.6-sol",
   "thinkingLevel": "high",
+  "skills": [
+    {
+      "name": "blueprint",
+      "description": "Analyze why a codebase works unusually well"
+    }
+  ],
   "startedAt": "2026-08-29T00:00:00.000Z",
   "updatedAt": "2026-08-29T00:05:00.000Z"
 }
 ```
 
-`startedAt` remains stable for sorting. `updatedAt` changes when session metadata is rewritten. Writes use a temporary file followed by atomic rename.
+`startedAt` remains stable for sorting. `updatedAt` changes when session metadata is rewritten. `skills` is an additive, backward-compatible field; an older registry without it exposes an empty completion list. Writes use a temporary file followed by atomic rename.
+
+The extension derives `skills` from `pi.getCommands()` rather than scanning skill directories. This mirrors Pi's effective resource loading, project trust, settings, package resources, collision handling, and command descriptions. A deferred rewrite after `resources_discover` also captures skills contributed by extensions. Only names and descriptions cross the local registry boundary; `SKILL.md` contents and paths do not.
 
 `PiBridgeClient.discover_targets()` validates that the PID is alive and the socket exists. Invalid or stale registry records are removed. It removes a stale socket only when it is a Unix socket inside the expected user-specific socket directory and has the expected `pi-` prefix.
 
@@ -165,6 +175,10 @@ forceEditorRender?.();
 `setEditorText` updates only Pi's unsent input. It does not submit, append a conversation message, or start an agent turn. Socket callbacks occur outside Pi's normal keyboard event path, and an incremental render can leave stale cells when the replacement changes line prefixes or wrapping. During `session_start`, Ghostwriter installs a zero-line widget factory to capture the supported TUI object; `forceEditorRender` calls `tui.requestRender(true)`. The hook is removed during shutdown and never adds visible content.
 
 This render workaround is intentionally isolated in the extension. If a future Pi release makes `setEditorText` schedule a full repaint itself, remove the hook only after an interactive regression test.
+
+## Skill invocation text
+
+Ghostwriter inserts `/skill:<name>` directly into the draft and sends it unchanged. Skills do not have attachment-style metadata, checkboxes, or previews. When an invocation begins Pi's submitted input and skill commands are enabled, Pi performs its normal command expansion. An invocation embedded later in prose remains literal text, which still gives the Agent an explicit skill name to match against its available-skill instructions.
 
 ## Attachment serialization
 
