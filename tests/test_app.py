@@ -11,6 +11,7 @@ from textual.widgets import Select
 from textual.widgets._select import InvalidSelectValueError
 
 from ghostwriter.app import CurrentThemeProvider, GhostwriterApp
+from ghostwriter.config import ConfigStore
 from ghostwriter.model import Draft
 from ghostwriter.pi import PiSkill, PiTarget
 from ghostwriter.storage import DraftStore
@@ -299,6 +300,35 @@ async def test_at_completion_attaches_project_file_with_compact_marker(tmp_path:
         assert app.query_one("#attachments").row_count == 1
 
 
+@pytest.mark.asyncio
+async def test_at_completion_attaches_project_directory(tmp_path: Path) -> None:
+    source = tmp_path / "reference-notes"
+    source.mkdir()
+    (source / "context.md").write_text("context", encoding="utf-8")
+    app = GhostwriterApp()
+    app.draft = Draft(text="")
+    app.store = DraftStore(tmp_path / "draft.json")
+
+    async with app.run_test(size=(120, 40)) as pilot:
+        app._project_root = lambda: tmp_path
+        editor = app.query_one("#prompt-editor")
+        editor.load_text("Review @reference")
+        editor.cursor_location = (0, len(editor.text))
+        app._update_file_completions()
+
+        assert app.query_one("#prompt-completions").display
+        assert app._handle_completion_key("tab")
+        await pilot.pause()
+
+        assert editor.text == "Review @reference-notes/ "
+        assert app.draft.attachments[0].source == source.resolve()
+        assert app.draft.attachments[0].kind == "directory"
+        app._show_attachment_preview(app.draft.attachments[0])
+        assert app.query_one("#preview-message").render().plain == (
+            "Directory preview unavailable"
+        )
+
+
 def test_command_palette_omits_screenshot_and_only_offers_comfortable_themes() -> None:
     app = GhostwriterApp()
 
@@ -314,7 +344,7 @@ def test_command_palette_omits_screenshot_and_only_offers_comfortable_themes() -
 
 @pytest.mark.asyncio
 async def test_theme_palette_opens_on_current_theme(tmp_path: Path) -> None:
-    app = GhostwriterApp()
+    app = GhostwriterApp(config_store=ConfigStore(tmp_path / "config.json"))
     app.store = DraftStore(tmp_path / "draft.json")
 
     async with app.run_test():
@@ -322,6 +352,21 @@ async def test_theme_palette_opens_on_current_theme(tmp_path: Path) -> None:
         provider = CurrentThemeProvider(app.screen)
 
         assert provider.commands[0][0] == "nord"
+
+
+@pytest.mark.asyncio
+async def test_selected_theme_is_saved_and_restored(tmp_path: Path) -> None:
+    config_store = ConfigStore(tmp_path / "config.json")
+    app = GhostwriterApp(config_store=config_store)
+    app.store = DraftStore(tmp_path / "draft.json")
+
+    async with app.run_test() as pilot:
+        app.theme = "rose-pine-moon"
+        await pilot.pause()
+
+    assert config_store.reload().ui.theme == "rose-pine-moon"
+    restored = GhostwriterApp(config_store=config_store)
+    assert restored.theme == "rose-pine-moon"
 
 
 @pytest.mark.asyncio
@@ -395,7 +440,7 @@ async def test_header_opens_full_settings_menu_with_title_on_right(tmp_path: Pat
 
 @pytest.mark.asyncio
 async def test_prompt_text_stays_white_across_themes(tmp_path: Path) -> None:
-    app = GhostwriterApp()
+    app = GhostwriterApp(config_store=ConfigStore(tmp_path / "config.json"))
     app.draft = Draft(text="Plain text")
     app.store = DraftStore(tmp_path / "draft.json")
 
@@ -409,7 +454,7 @@ async def test_prompt_text_stays_white_across_themes(tmp_path: Path) -> None:
 
 @pytest.mark.asyncio
 async def test_theme_colors_accent_controls_without_tinting_content_panels(tmp_path: Path) -> None:
-    app = GhostwriterApp()
+    app = GhostwriterApp(config_store=ConfigStore(tmp_path / "config.json"))
     app.store = DraftStore(tmp_path / "draft.json")
 
     async with app.run_test(size=(120, 40)) as pilot:

@@ -22,6 +22,13 @@ def test_existing_paths_accepts_unescaped_path_with_spaces(tmp_path: Path) -> No
     assert existing_paths(str(source)) == [source]
 
 
+def test_existing_paths_accepts_directories(tmp_path: Path) -> None:
+    source = tmp_path / "reference notes"
+    source.mkdir()
+
+    assert existing_paths(str(source)) == [source]
+
+
 def test_text_preview_returns_raw_source(tmp_path: Path) -> None:
     source = tmp_path / "example.py"
     source.write_text("def answer():\n    return 42\n", encoding="utf-8")
@@ -51,7 +58,39 @@ def test_python_index_fallback_skips_hidden_and_generated_directories(
         path.write_text("data", encoding="utf-8")
     monkeypatch.setattr("ghostwriter.files.shutil.which", lambda _name: None)
 
-    assert build_file_index(tmp_path) == ["src/visible.py"]
+    assert build_file_index(tmp_path) == ["src/", "src/visible.py"]
+
+
+def test_index_includes_directories_and_git_local_excludes(tmp_path: Path) -> None:
+    excluded_directory = tmp_path / "local-context"
+    excluded_directory.mkdir()
+    excluded_file = excluded_directory / "notes.md"
+    excluded_file.write_text("local", encoding="utf-8")
+    info = tmp_path / ".git" / "info"
+    info.mkdir(parents=True)
+    (info / "exclude").write_text("local-context/\n", encoding="utf-8")
+
+    index = build_file_index(tmp_path)
+
+    assert "local-context/" in index
+    assert "local-context/notes.md" in index
+
+
+def test_fd_index_requests_directories_and_bypasses_vcs_excludes(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("ghostwriter.files.shutil.which", lambda _name: "/bin/fd")
+
+    def fake_run(command: list[str], **kwargs: object) -> subprocess.CompletedProcess[bytes]:
+        assert "--type=file" in command
+        assert "--type=directory" in command
+        assert "--no-ignore-vcs" in command
+        return subprocess.CompletedProcess(command, 0, b"src/\0src/app.py\0", b"")
+
+    monkeypatch.setattr("ghostwriter.files.subprocess.run", fake_run)
+
+    assert build_file_index(tmp_path) == ["src/", "src/app.py"]
 
 
 def test_fzf_ranks_non_contiguous_path_matches(
@@ -92,3 +131,13 @@ def test_file_completions_search_project_and_absolute_paths(tmp_path: Path) -> N
     assert project_matches[0].path == source
     assert project_matches[0].label == "src/candidate_prompt.md"
     assert absolute_matches[0].path == source
+
+
+def test_file_completions_return_project_directories(tmp_path: Path) -> None:
+    directory = tmp_path / "reference-notes"
+    directory.mkdir()
+    index = build_file_index(tmp_path)
+
+    matches = find_file_completions(tmp_path, "reference", index)
+
+    assert matches[0] == FileCompletion(directory, "reference-notes/", is_directory=True)

@@ -4,6 +4,9 @@ All notable changes to Ghostwriter will be documented here. The project follows 
 
 ## Unreleased
 
+- Added folder attachments with trailing-slash markers to `@` completion and kept Git-locally-excluded paths searchable.
+- Persisted Theme palette choices through a validated `ui.theme` configuration field.
+- Replaced the auto-loaded `AGENTS.md` with an opt-in agent reference page.
 - Added target-aware `/skill:<name>` completion anywhere in the prompt, with Tab insertion, one-line descriptions, and highlighted skill tokens.
 - Reserved visible space for prompt actions in compact and stacked layouts.
 - Consolidated Pi target identity into one concise scrollable list.

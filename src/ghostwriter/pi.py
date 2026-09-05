@@ -90,6 +90,8 @@ def _display_path(path: Path, cwd: Path) -> str:
 
 def format_file_reference(path: Path, cwd: Path) -> str:
     value = _display_path(path, cwd)
+    if path.expanduser().resolve().is_dir():
+        value += "/"
     if '"' in value or "\n" in value or "\r" in value:
         raise ValueError(f"Pi file references cannot safely represent this path: {value!r}")
     return f'@"{value}"' if any(character.isspace() for character in value) else f"@{value}"

@@ -77,7 +77,7 @@ def parse_paths(value: str) -> list[Path]:
 
 def existing_paths(value: str) -> list[Path]:
     paths = parse_paths(value)
-    if paths and all(path.is_file() for path in paths):
+    if paths and all(path.is_file() or path.is_dir() for path in paths):
         return paths
 
     # Some terminals paste an unescaped path containing spaces.
@@ -85,7 +85,7 @@ def existing_paths(value: str) -> list[Path]:
     if whole.startswith("file://"):
         whole = unquote(urlparse(whole).path)
     whole_path = Path(whole).expanduser()
-    return [whole_path] if whole_path.is_file() else []
+    return [whole_path] if whole_path.is_file() or whole_path.is_dir() else []
 
 
 def choose_native_paths() -> list[Path]:
@@ -157,6 +157,8 @@ def _build_fd_index(
     command = [
         fd,
         "--type=file",
+        "--type=directory",
+        "--no-ignore-vcs",
         "--color=never",
         "--print0",
         "--strip-cwd-prefix=always",
@@ -201,6 +203,10 @@ def _build_python_index(
                 if name not in skipped_directories and (include_hidden or not name.startswith("."))
             )
             relative_directory = Path(directory).relative_to(root)
+            for name in names:
+                files.append((relative_directory / name).as_posix() + "/")
+                if len(files) >= MAX_INDEXED_FILES:
+                    return files
             for filename in sorted(filenames):
                 if not include_hidden and filename.startswith("."):
                     continue
@@ -254,7 +260,10 @@ def find_file_completions(
         limit=limit,
     )
     if fuzzy_matches is not None:
-        return [FileCompletion(root / relative, relative) for relative in fuzzy_matches]
+        return [
+            FileCompletion(root / relative, relative, relative.endswith("/"))
+            for relative in fuzzy_matches
+        ]
 
     lowered_needle = needle.lower()
 
@@ -279,7 +288,10 @@ def find_file_completions(
         ranked_candidates(),
         key=lambda item: (item[0], len(item[1]), item[1].lower()),
     )
-    return [FileCompletion(root / relative, relative) for _, relative in ranked]
+    return [
+        FileCompletion(root / relative, relative, relative.endswith("/"))
+        for _, relative in ranked
+    ]
 
 
 def _rank_with_fzf(

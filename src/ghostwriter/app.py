@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import re
 from collections.abc import Callable, Iterable
+from dataclasses import replace
 from pathlib import Path
 from typing import ClassVar, Literal
 
@@ -17,7 +18,7 @@ from textual.document._document_navigator import DocumentNavigator
 from textual.events import Resize
 from textual.message import Message
 from textual.screen import Screen
-from textual.theme import ThemeProvider
+from textual.theme import Theme, ThemeProvider
 from textual.widgets import (
     Button,
     DataTable,
@@ -32,7 +33,7 @@ from textual.widgets.option_list import Option
 from textual.widgets.text_area import TextAreaTheme
 from textual_image.widget import Image
 
-from .config import ConfigStore, RewriteConfig, open_config_file
+from .config import UI_THEMES, ConfigStore, RewriteConfig, UIConfig, open_config_file
 from .files import (
     FileCompletion,
     build_file_index,
@@ -178,16 +179,7 @@ class GhostwriterApp(App[None]):
     NO_TARGET_ID = "__no-active-pi-session__"
     NO_TARGET_LABEL = "No active Pi session"
     CSS_PATH = "ghostwriter.tcss"
-    COMFORTABLE_THEMES = frozenset(
-        {
-            "textual-dark",
-            "nord",
-            "gruvbox",
-            "catppuccin-mocha",
-            "tokyo-night",
-            "rose-pine-moon",
-        }
-    )
+    COMFORTABLE_THEMES = frozenset(UI_THEMES)
 
     BINDINGS: ClassVar[list[Binding]] = [
         Binding("ctrl+enter", "inject", "Inject into Pi", priority=True),
@@ -198,16 +190,20 @@ class GhostwriterApp(App[None]):
         Binding("ctrl+q", "quit", "Quit"),
     ]
 
-    def __init__(self, initial_paths: list[Path] | None = None) -> None:
+    def __init__(
+        self,
+        initial_paths: list[Path] | None = None,
+        *,
+        config_store: ConfigStore | None = None,
+    ) -> None:
         super().__init__()
-        if self.theme not in self.COMFORTABLE_THEMES:
-            self.theme = "textual-dark"
         for theme_name in set(self.available_themes) - self.COMFORTABLE_THEMES:
             self.unregister_theme(theme_name)
         self.store = DraftStore()
-        self.config_store = ConfigStore()
+        self.config_store = config_store or ConfigStore()
         self.draft = self.store.load()
         self.config = self.config_store.load()
+        self.theme = self.config.ui.theme
         self.pi = PiBridgeClient()
         self.targets: dict[str, PiTarget] = {}
         self.selected_target_id: str | None = None
@@ -278,7 +274,7 @@ class GhostwriterApp(App[None]):
                         id="prompt-editor",
                         soft_wrap=True,
                         show_line_numbers=False,
-                        placeholder="Compose here, type @ to attach, or /skill: to add a skill…",
+                        placeholder="Compose here, type @ to attach a file or folder, or /skill: to add a skill…",
                     )
                     yield OptionList(id="prompt-completions", markup=False, compact=True)
                 yield DragHandle(id="height-handle")
@@ -368,6 +364,7 @@ class GhostwriterApp(App[None]):
         self.call_after_refresh(self._apply_split)
 
     def on_mount(self) -> None:
+        self.theme_changed_signal.subscribe(self, self._persist_theme, immediate=True)
         self._prompt_editor = self.query_one("#prompt-editor", TextArea)
         table = self.query_one("#attachments", DataTable)
         table.add_column("Attachment")
@@ -460,9 +457,22 @@ class GhostwriterApp(App[None]):
         )
         if config.file_search != previous_file_search:
             self._file_index_root = None
+        if self.theme != config.ui.theme:
+            self.theme = config.ui.theme
         if rewrite.keep_rpc_warm and not previous_rewrite.keep_rpc_warm and not self.is_headless:
             self.run_worker(self._warm_rewrite_rpc(), exclusive=True, group="rewrite-warmup")
         return rewrite
+
+    def _persist_theme(self, theme: Theme) -> None:
+        if theme.name == self.config.ui.theme:
+            return
+        updated = replace(self.config, ui=UIConfig(theme=theme.name))
+        try:
+            self.config_store.save(updated)
+        except OSError as error:
+            self.notify(f"Could not save theme: {error}", severity="warning")
+        else:
+            self.config = updated
 
     def _capture_text(self) -> None:
         if self._prompt_editor is not None:
@@ -480,16 +490,19 @@ class GhostwriterApp(App[None]):
         table = self.query_one("#attachments", DataTable)
         table.clear()
         for attachment in self.draft.attachments:
-            table.add_row(attachment.source.name, key=attachment.id)
+            table.add_row(attachment.display_name, key=attachment.id)
 
     def _add_attachment(self, path: Path) -> None:
         source = path.expanduser().resolve(strict=True)
-        if not source.is_file():
-            raise ValueError(f"Not a file: {source}")
+        if not source.is_file() and not source.is_dir():
+            raise ValueError(f"Not a file or directory: {source}")
         if any(item.source == source for item in self.draft.attachments):
             raise ValueError(f"Already attached: {source}")
 
-        kind = "image" if looks_like_image(source) else "file"
+        if source.is_dir():
+            kind = "directory"
+        else:
+            kind = "image" if looks_like_image(source) else "file"
         attachment = Attachment(kind=kind, source_path=str(source))
         if any(item.editor_token == attachment.editor_token for item in self.draft.attachments):
             raise ValueError(f"An attachment named {source.name!r} is already present")
@@ -504,7 +517,7 @@ class GhostwriterApp(App[None]):
         self._refresh_attachment_table()
         self._capture_text()
         self.store.save(self.draft)
-        self._set_status(f"Attached {source.name}")
+        self._set_status(f"Attached {attachment.display_name}")
 
     def _add_paths(self, paths: list[Path]) -> None:
         failures: list[str] = []
@@ -696,17 +709,13 @@ class GhostwriterApp(App[None]):
             return
         _, start, end = context
         editor = self.query_one("#prompt-editor", TextArea)
-        replacement = f"@{candidate.label}" if candidate.is_directory else ""
-        result = editor.replace(replacement, start, end, maintain_selection_offset=False)
+        result = editor.replace("", start, end, maintain_selection_offset=False)
         editor.move_cursor(result.end_location)
-        if candidate.is_directory:
-            self._update_file_completions()
-        else:
-            self._hide_completions()
-            try:
-                self._add_attachment(candidate.path)
-            except (OSError, ValueError) as error:
-                self.notify(str(error), severity="error")
+        self._hide_completions()
+        try:
+            self._add_attachment(candidate.path)
+        except (OSError, ValueError) as error:
+            self.notify(str(error), severity="error")
         editor.focus()
 
     def _accept_skill_completion(self, index: int) -> None:
@@ -983,6 +992,10 @@ class GhostwriterApp(App[None]):
 
         path.display = True
         path.update(str(attachment.source))
+        if attachment.source.is_dir():
+            message.display = True
+            message.update("Directory preview unavailable")
+            return
         if attachment.kind == "image" and attachment.source.exists():
             image.image = attachment.source
             image.display = True

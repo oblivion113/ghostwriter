@@ -186,9 +186,10 @@ The editor marker is local Ghostwriter state. Before injection, Python emits Pi-
 
 - any attachment under Pi's working directory becomes `@relative/path`;
 - a path containing whitespace becomes `@"relative/path with spaces"`;
-- an attachment outside the working directory becomes an absolute `@path` reference.
+- an attachment outside the working directory becomes an absolute `@path` reference;
+- folders use the same syntax as files, retain a trailing `/`, and remain path references for the agent to inspect with Pi's tools.
 
-Ghostwriter always references the original file; it does not hash, copy, or symlink attachments. Images and other files use identical serialized syntax. Pi's `read` tool detects supported images from their byte signatures when the agent opens a reference, while Ghostwriter's stored `kind` exists only to select a local preview. Paths containing quotes or line breaks are rejected because they cannot be represented safely by the current Pi file-reference syntax.
+Ghostwriter always references the original path; it does not hash, copy, or symlink attachments. Images, other files, and folders use identical serialized syntax. Pi's `read` tool detects supported images from their byte signatures when the agent opens a file reference, while Ghostwriter's stored `kind` exists only to select a local preview. Paths containing quotes or line breaks are rejected because they cannot be represented safely by the current Pi path-reference syntax.
 
 ## Status command
 

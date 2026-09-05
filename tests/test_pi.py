@@ -14,9 +14,12 @@ from ghostwriter.pi import PiBridgeClient, PiTarget, format_file_reference, seri
 def test_file_references_are_relative_and_quote_spaces(tmp_path: Path) -> None:
     plain = tmp_path / "src" / "main.py"
     spaced = tmp_path / "notes" / "design brief.md"
+    directory = tmp_path / "reference notes"
+    directory.mkdir()
 
     assert format_file_reference(plain, tmp_path) == "@src/main.py"
     assert format_file_reference(spaced, tmp_path) == '@"notes/design brief.md"'
+    assert format_file_reference(directory, tmp_path) == '@"reference notes/"'
 
 
 def test_serialize_draft_uses_original_paths_for_files_and_images(tmp_path: Path) -> None:

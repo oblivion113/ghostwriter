@@ -12,7 +12,7 @@ Compose in Ghostwriter  ── Ctrl+Enter ──▶  Review in Pi  ── Enter 
 
 | Compose comfortably | Bring the right context | Stay in control |
 | --- | --- | --- |
-| Mouse editing, selection, clipboard, undo/redo, soft wrapping, and persistent drafts | Drag files, preview images and text, search with `@`, and complete `/skill:<name>` anywhere | Local socket injection replaces only unsent editor text; no synthetic typing and no automatic submission |
+| Mouse editing, selection, clipboard, undo/redo, soft wrapping, and persistent drafts | Drag files, preview images and text, search files or folders with `@`, and complete `/skill:<name>` anywhere | Local socket injection replaces only unsent editor text; no synthetic typing and no automatic submission |
 
 ## Quick start
 
@@ -44,9 +44,9 @@ For a development-only checkout that does not install the command or modify Pi s
 
 ### Attachments
 
-Drag files into the editor, choose **Attach**, paste a local path, or type `@` to search the selected Pi project's files. Every route creates the same compact marker, such as `@design.md`.
+Drag files into the editor, choose **Attach**, paste a local path, or type `@` to search the selected Pi project's files and folders. `@` search includes paths hidden by Git's local excludes, which keeps untracked local context selectable. Every route creates the same compact marker, such as `@design.md` or `@notes/`.
 
-Ghostwriter keeps the original file in place rather than copying it. Text and images can be previewed locally; at injection time the marker becomes Pi's normal file syntax:
+Ghostwriter keeps the original path in place rather than copying it. Text and images can be previewed locally; at injection time the marker becomes Pi's normal path syntax:
 
 ```text
 @src/example.ts
@@ -107,7 +107,7 @@ Ghostwriter has a deliberately narrow job: prepare a prompt and place it in Pi's
 
 ## Configuration
 
-Choose **Settings → Open config** to edit Ghostwriter's generated JSON configuration. It controls file search, rewrite models, target languages, standing instructions, custom prompts, and optional RPC warm-up. Reload it from Ghostwriter after saving.
+Choose **Settings → Open config** to edit Ghostwriter's generated JSON configuration. It controls the persistent theme, file search, rewrite models, target languages, standing instructions, custom prompts, and optional RPC warm-up. Theme choices are saved immediately; reload other manual edits from Ghostwriter after saving.
 
 See [`docs/configuration.md`](docs/configuration.md) for the configuration format and examples.
 
@@ -121,10 +121,11 @@ See [`docs/configuration.md`](docs/configuration.md) for the configuration forma
 | [`docs/pi-bridge.md`](docs/pi-bridge.md) | Pi APIs, runtime registry, and wire protocol |
 | [`docs/development.md`](docs/development.md) | Local setup, tests, debugging, releases, and uninstalling |
 | [`CONTRIBUTING.md`](CONTRIBUTING.md) | Contribution workflow and project invariants |
+| [`docs/agent-reference.md`](docs/agent-reference.md) | Compact codebase orientation for coding agents |
 
 ## For Agents
 
-Read [`AGENTS.md`](AGENTS.md) first. It maps the repository, lists the verification commands, and records the invariants that must survive every change. Read `docs/pi-bridge.md` before changing Pi integration and `docs/architecture.md` before moving responsibilities between modules.
+Use [`docs/agent-reference.md`](docs/agent-reference.md) when an agent needs a compact repository map, verification commands, and design constraints. It is intentionally a normal reference page rather than an automatically loaded `AGENTS.md`. Read `docs/pi-bridge.md` before changing Pi integration and `docs/architecture.md` before moving responsibilities between modules.
 
 The short version: preserve Ghostwriter's Pi-only scope, keep attachment data local during rewrites, and never turn editor replacement into submission.
 

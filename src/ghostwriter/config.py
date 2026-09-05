@@ -15,6 +15,15 @@ from platformdirs import user_config_path
 from .files import DEFAULT_SKIPPED_DIRECTORIES
 
 CONFIG_VERSION = 1
+DEFAULT_THEME = "textual-dark"
+UI_THEMES = (
+    "textual-dark",
+    "nord",
+    "gruvbox",
+    "catppuccin-mocha",
+    "tokyo-night",
+    "rose-pine-moon",
+)
 DEFAULT_REWRITE_PROMPT = """Transform the draft under these requirements:
 {instructions}
 - Return the entire transformed draft and nothing else.
@@ -207,8 +216,26 @@ class FileSearchConfig:
 
 
 @dataclass(frozen=True, slots=True)
+class UIConfig:
+    theme: str = DEFAULT_THEME
+
+    @classmethod
+    def from_dict(cls, data: object) -> UIConfig:
+        if not isinstance(data, dict):
+            raise TypeError("ui must be an object")
+        theme = data.get("theme", DEFAULT_THEME)
+        if not isinstance(theme, str) or theme not in UI_THEMES:
+            raise ValueError(f"ui.theme must be one of: {', '.join(UI_THEMES)}")
+        return cls(theme=theme)
+
+    def to_dict(self) -> dict[str, str]:
+        return {"theme": self.theme}
+
+
+@dataclass(frozen=True, slots=True)
 class GhostwriterConfig:
     version: int = CONFIG_VERSION
+    ui: UIConfig = field(default_factory=UIConfig)
     file_search: FileSearchConfig = field(default_factory=FileSearchConfig)
     rewrite: RewriteConfig = field(default_factory=RewriteConfig)
 
@@ -221,6 +248,7 @@ class GhostwriterConfig:
             raise ValueError(f"Unsupported Ghostwriter config version: {version!r}")
         return cls(
             version=CONFIG_VERSION,
+            ui=UIConfig.from_dict(data.get("ui", {})),
             file_search=FileSearchConfig.from_dict(data.get("fileSearch", {})),
             rewrite=RewriteConfig.from_dict(data.get("rewrite", {})),
         )
@@ -228,6 +256,7 @@ class GhostwriterConfig:
     def to_dict(self) -> dict[str, Any]:
         return {
             "version": self.version,
+            "ui": self.ui.to_dict(),
             "fileSearch": self.file_search.to_dict(),
             "rewrite": self.rewrite.to_dict(),
         }

@@ -10,9 +10,10 @@ The simplest way to find and edit it is **Settings → Open config**. Save the f
 
 ## Structure
 
-The configuration has two sections:
+The configuration has three sections:
 
-- `fileSearch` controls `@` attachment discovery and ranking.
+- `ui` controls persistent interface preferences.
+- `fileSearch` controls `@` file and folder discovery and ranking.
 - `rewrite` controls Translate / Tidy models, languages, instructions, and process lifetime.
 
 This focused example is valid; omitted fields use their defaults:
@@ -20,6 +21,9 @@ This focused example is valid; omitted fields use their defaults:
 ```json
 {
   "version": 1,
+  "ui": {
+    "theme": "nord"
+  },
   "fileSearch": {
     "includeHidden": false,
     "useGlobalFzfOptions": true,
@@ -41,15 +45,21 @@ This focused example is valid; omitted fields use their defaults:
 
 The generated file also contains the full default `skipDirectories` list and rewrite `prompt`.
 
+## Interface
+
+`ui.theme` sets the active theme and is updated automatically whenever a new theme is chosen from Ghostwriter's Theme palette. Available values are `textual-dark`, `nord`, `gruvbox`, `catppuccin-mocha`, `tokyo-night`, and `rose-pine-moon`.
+
 ## File search
 
 | Field | Meaning |
 | --- | --- |
-| `includeHidden` | Include hidden files during `@` search. Defaults to `false`. |
+| `includeHidden` | Include hidden files and folders during `@` search. Defaults to `false`. |
 | `useGlobalFzfOptions` | Inherit `FZF_DEFAULT_OPTS` and `FZF_DEFAULT_OPTS_FILE`. Set it to `false` for app-only behavior. |
 | `skipDirectories` | Directory names omitted by both `fd` and the Python fallback, such as `.git`, `node_modules`, caches, and build outputs. Entries must be unique names, not paths. |
 | `ignoreFiles` | Additional gitignore-format files passed to `fd`. Paths may use `~`. |
 | `fzfOptions` | Extra command-line arguments used for non-interactive `fzf --filter` ranking. |
+
+Git's VCS ignore rules do not hide `@` candidates, so local context listed in `.git/info/exclude` remains selectable. The explicit `skipDirectories` and `ignoreFiles` settings still remove unwanted paths, and hidden paths remain controlled by `includeHidden`.
 
 `fd` and `fzf` are optional. If either operation is unavailable or fails, Ghostwriter uses its bounded Python search and ranking fallback.
 

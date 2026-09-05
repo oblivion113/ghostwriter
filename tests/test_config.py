@@ -20,6 +20,7 @@ def test_config_store_creates_editable_defaults(tmp_path: Path) -> None:
     config = ConfigStore(path).load()
 
     assert path.is_file()
+    assert config.ui.theme == "textual-dark"
     assert config.file_search.include_hidden is False
     assert config.file_search.use_global_fzf_options
     assert "node_modules" in config.file_search.skipped_directories
@@ -38,6 +39,7 @@ def test_config_loads_agents_languages_and_custom_prompt(tmp_path: Path) -> None
         json.dumps(
             {
                 "version": 1,
+                "ui": {"theme": "nord"},
                 "fileSearch": {
                     "includeHidden": True,
                     "useGlobalFzfOptions": False,
@@ -65,6 +67,7 @@ def test_config_loads_agents_languages_and_custom_prompt(tmp_path: Path) -> None
 
     config = ConfigStore(path).load()
 
+    assert config.ui.theme == "nord"
     assert config.file_search.include_hidden
     assert not config.file_search.use_global_fzf_options
     assert config.file_search.fzf_options == ("--exact",)
@@ -94,6 +97,11 @@ def test_legacy_named_default_agent_is_migrated_to_first_provider_model() -> Non
     serialized = config.to_dict()["rewrite"]
     assert "defaultAgent" not in serialized
     assert all("name" not in agent for agent in serialized["agents"])
+
+
+def test_config_rejects_unknown_theme() -> None:
+    with pytest.raises(ValueError, match="ui.theme"):
+        GhostwriterConfig.from_dict({"version": 1, "ui": {"theme": "unknown"}})
 
 
 def test_config_reload_reports_invalid_edits_without_replacing_them(tmp_path: Path) -> None:

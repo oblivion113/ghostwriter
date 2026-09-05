@@ -17,7 +17,7 @@ def main() -> None:
         "paths",
         nargs="*",
         type=Path,
-        help="Files or images to attach when the composer opens",
+        help="Files, folders, or images to attach when the composer opens",
     )
     args = parser.parse_args()
     GhostwriterApp(initial_paths=args.paths).run()

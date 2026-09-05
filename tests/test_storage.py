@@ -46,6 +46,31 @@ def test_legacy_image_cache_is_removed(tmp_path: Path) -> None:
     assert not cache.exists()
 
 
+def test_version_three_folder_attachment_gains_directory_kind_and_slash(
+    tmp_path: Path,
+) -> None:
+    directory = tmp_path / "notes"
+    directory.mkdir()
+
+    restored = Draft.from_dict(
+        {
+            "version": 3,
+            "text": "Review @notes",
+            "attachments": [
+                {
+                    "kind": "file",
+                    "source_path": str(directory),
+                    "id": "abcdef1234567890",
+                }
+            ],
+        }
+    )
+
+    assert restored.text == "Review @notes/"
+    assert restored.attachments[0].kind == "directory"
+    assert restored.attachments[0].display_name == "notes/"
+
+
 def test_version_two_draft_discards_staged_attachment_path() -> None:
     restored = Draft.from_dict(
         {
@@ -61,6 +86,6 @@ def test_version_two_draft_discards_staged_attachment_path() -> None:
         }
     )
 
-    assert restored.to_dict()["version"] == 3
+    assert restored.to_dict()["version"] == 4
     assert restored.attachments[0].source == Path("/private/source.png")
     assert "injected_path" not in restored.attachments[0].to_dict()
