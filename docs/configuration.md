@@ -72,7 +72,7 @@ Focus on correctness and security.
 
 Choose **Prompts** to browse the folder. **Insert** adds the selected template as a `/prompt:<name>` reference, such as `/prompt:review`, at the cursor, while **Expand** expands all references already in the draft. `F3` performs the same expansion without opening the picker. **Open folder** opens the configured directory; use **Settings → Refresh** after templates are added or removed.
 
-Inline completion follows the same grammar as Skills: type `/prompt:rev`, then press Tab or click the result to insert `/prompt:review`. If a referenced template was removed or renamed, expansion stops without partially changing the draft.
+Inline completion starts with `/`, which lists the Prompt and Skill routes. Type `/p` and press Tab to complete `/prompt:` and open the template list. Continue with a partial name and accept the matching `/prompt:<name>` reference, or type the full `/prompt:rev` form directly. If a referenced template was removed or renamed, expansion stops without partially changing the draft.
 
 Pi argument expressions such as `$1`, `$@`, and `${@:2}` are not evaluated; they remain literal body text. Pi expands templates only inside its prompt-submission pipeline, and its extension API has no supported post-expansion interception point that can return the result without dispatching an Agent turn. Ghostwriter therefore avoids maintaining a second, potentially divergent implementation.
 

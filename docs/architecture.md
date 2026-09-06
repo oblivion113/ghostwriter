@@ -21,6 +21,7 @@ The Python application owns composition and local state. The TypeScript extensio
 | Path | Responsibility |
 | --- | --- |
 | `src/ghostwriter/app.py` | Textual widgets, responsive layout, actions, workers, and screen orchestration |
+| `src/ghostwriter/completions.py` | Inline completion grammar, slash routes, and name filtering |
 | `src/ghostwriter/model.py` | Versioned `Draft` and `Attachment` serialization |
 | `src/ghostwriter/config.py` | Unified JSON UI, file-search, and rewrite settings with validation |
 | `src/ghostwriter/files.py` | Path parsing, project indexing and ranking, native picker, and safe previews |
@@ -39,7 +40,7 @@ The project is intentionally Pi-specific. `PiBridgeClient` is a concrete boundar
 ## Main injection flow
 
 1. `GhostwriterApp` loads a versioned draft from `DraftStore`.
-2. Files enter through drag-and-drop, the native picker, startup arguments, or `@` completion; folders enter through pasted paths, startup arguments, or `@` completion. Inline Prompt completion and the Prompt picker insert styled `/prompt:<name>` references, while Skill invocations enter as ordinary `/skill:<name>` text through target-aware completion.
+2. Files enter through drag-and-drop, the native picker, startup arguments, or `@` completion; folders enter through pasted paths, startup arguments, or `@` completion. The `/` completion menu routes to Prompts or Skills, then inserts styled `/prompt:<name>` references or ordinary `/skill:<name>` text. The Prompt picker remains an alternative to inline completion.
 3. The Prompt picker's **Expand** action, or the global `F3` binding, replaces every valid Prompt reference in place. The editor displays styled attachment markers using a working-directory-relative path inside the selected project and an absolute path outside it; `Attachment` retains that editor path and the original source, while Prompt expansions and Skill invocations create no separate draft state.
 4. The selected `PiTarget` supplies the target working directory, socket, and Pi's loaded skill metadata.
 5. `serialize_draft()` replaces every display marker with the same Pi file-reference syntax: `@relative/path`, `@"path with spaces"`, or an absolute reference when the source is outside Pi's working directory.
@@ -68,11 +69,11 @@ After three filename characters and a 120 ms debounce, a thread worker queries t
 
 `fzf --filter` performs path-aware fuzzy ranking for both candidate sources, with a bounded-memory Python fallback for the project when unavailable. Global fzf options are inherited unless disabled in `fileSearch`. Queries beginning with `/` or a valid `~` expression use direct filesystem completion; incomplete expressions remain ordinary editable queries instead of raising from `Path.expanduser()`. `Ctrl+R` and **Refresh** both invalidate these indexes and rediscover Pi target and Skill metadata.
 
-Prompt templates are loaded non-recursively from `promptTemplates.directory` at startup and through **Settings → Refresh**. Each `.md` file requires a simple, single-line `name`; `description` is optional and may be empty, and the remaining body is retained literally. A `/prompt:<partial-name>` invocation immediately before the cursor filters the same in-memory list used by the picker and inserts a `/prompt:<name>` reference. Expansion validates every reference before making any replacement, so a missing template cannot cause a partial result. Multiple references are supported and internal body line breaks are preserved.
+Prompt templates are loaded non-recursively from `promptTemplates.directory` at startup and through **Settings → Refresh**. Each `.md` file requires a simple, single-line `name`; `description` is optional and may be empty, and the remaining body is retained literally. Typing `/p` and accepting the route completes `/prompt:` before showing the same in-memory list used by the picker; a full `/prompt:<partial-name>` invocation also opens that list directly. Accepting a template inserts its `/prompt:<name>` reference. Expansion validates every reference before making any replacement, so a missing template cannot cause a partial result. Multiple references are supported and internal body line breaks are preserved.
 
 Pi's native parameter expansion is not reused. The extension `input` event occurs before template expansion, while the first event carrying expanded text, `before_agent_start`, cannot mark the input as handled. Calling Pi's expansion pipeline would therefore begin an Agent turn. Depending on Pi's private, unexported expansion module would create a version-fragile compatibility boundary, so parameter expressions remain literal.
 
-The Pi extension obtains loaded skills from `pi.getCommands()` and publishes only each name and description in the target registry. Ghostwriter filters that small in-memory list when `/skill` or `/skill:<partial-name>` appears immediately before the cursor after whitespace, including in the middle of a larger prompt. Descriptions are normalized for a one-line secondary label; no skill document is opened. Tab accepts the highlighted file, Prompt reference, or Skill candidate.
+The Pi extension obtains loaded Skills from `pi.getCommands()` and publishes only each name and description in the target registry. Typing `/` after whitespace shows Prompt and Skill routes; accepting `/s` completes `/skill:` and replaces the route menu with the selected session's Skill list. A full `/skill:<partial-name>` invocation opens that list directly, including in the middle of a larger prompt. Descriptions are normalized for a one-line secondary label; no Skill document is opened. Tab accepts the highlighted route, file, Prompt reference, or Skill candidate.
 
 ## Rewrite flow
 
@@ -93,6 +94,7 @@ No attachment path, filename, or content is sent to the rewrite model.
 Textual owns terminal rendering and input. Important custom behavior includes:
 
 - `PromptTextArea`: intercepts bracketed paste and Tab completion without re-running Textual's default handlers, soft-wraps prose, keeps it white across themes, and styles attachment, Prompt, and `/skill:<name>` markers without changing their text;
+- `completions.py`: keeps route, Prompt, Skill, and file-reference grammar independent of Textual rendering so matching and filtering have small unit tests;
 - `PromptTemplateScreen`: presents compact two-line entries and keeps draft changes behind explicit insert, expand, or cancel actions;
 - `DragHandle`: captures mouse events directly for independent width and height resizing;
 - `Select`: shows only the current Pi target until its dropdown is opened and uses a disabled sentinel only when no target exists;

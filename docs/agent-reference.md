@@ -7,6 +7,7 @@ Ghostwriter is a Pi-only terminal prompt composer: it composes locally, transfor
 ## Repository map
 
 - `src/ghostwriter/app.py`: Textual UI and interaction orchestration
+- `src/ghostwriter/completions.py`: inline completion grammar, slash routes, and name filtering
 - `src/ghostwriter/model.py`: persisted draft and attachment model
 - `src/ghostwriter/files.py`: project discovery, completion ranking, native picker, and text previews
 - `src/ghostwriter/prompt_templates.py`: simple Prompt metadata, references, and literal expansion

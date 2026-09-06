@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import re
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Sequence
 from dataclasses import replace
 from pathlib import Path
 from typing import ClassVar, Literal
@@ -35,6 +35,15 @@ from textual.widgets.text_area import TextAreaTheme
 from textual.worker import get_current_worker
 from textual_image.widget import Image
 
+from .completions import (
+    SLASH_COMPLETIONS,
+    CompletionContext,
+    CompletionKind,
+    NamedCompletion,
+    SlashCompletion,
+    filter_named_completions,
+    find_completion_context,
+)
 from .config import (
     UI_THEMES,
     ConfigStore,
@@ -80,9 +89,6 @@ from .storage import DraftStore, clear_legacy_image_cache
 from .wrapping import NaturalWrappedDocument
 
 SKILL_TOKEN_PATTERN = re.compile(r"(?<!\S)/skill:[a-z0-9-]+(?=$|\s)")
-SKILL_COMPLETION_PATTERN = re.compile(r"(?<!\S)/skill(?::([^\s]*))?$")
-FILE_COMPLETION_PATTERN = re.compile(r"(?<!\S)@([^\s]*)$")
-PROMPT_COMPLETION_PATTERN = re.compile(r"(?<!\S)/prompt(?::([^\s]*))?$")
 MAX_SYSTEM_COMPLETION_CACHE = 128
 SYSTEM_COMPLETION_DEBOUNCE = 0.12
 SYSTEM_COMPLETION_WORKER_GROUP = "system-file-completion"
@@ -260,10 +266,8 @@ class GhostwriterApp(App[None]):
         self.prompt_templates = load_prompt_templates(
             self.config.prompt_templates.directory
         )
-        self._completion_candidates: list[
-            FileCompletion | PiSkill | PromptTemplate
-        ] = []
-        self._completion_kind: Literal["file", "skill", "template"] | None = None
+        self._completion_candidates: list[FileCompletion | NamedCompletion] = []
+        self._completion_kind: CompletionKind | None = None
         self._file_index_root: Path | None = None
         self._file_index: list[str] = []
         self._system_completion_cache: dict[tuple[Path, str], list[FileCompletion]] = {}
@@ -316,7 +320,7 @@ class GhostwriterApp(App[None]):
                         id="prompt-editor",
                         soft_wrap=True,
                         show_line_numbers=False,
-                        placeholder="Compose here; type @ for files, /prompt: for Prompts, or /skill: for Skills…",
+                        placeholder="Compose here; type @ for files or / for Prompts and Skills…",
                     )
                     yield OptionList(id="prompt-completions", markup=False, compact=True)
                 yield DragHandle(id="height-handle")
@@ -647,50 +651,26 @@ class GhostwriterApp(App[None]):
         root = target.cwd if target is not None else Path.cwd()
         return root.expanduser().resolve()
 
-    def _file_completion_context(
-        self,
-    ) -> tuple[str, tuple[int, int], tuple[int, int]] | None:
+    def _completion_context(self, kind: CompletionKind) -> CompletionContext | None:
         editor = self.query_one("#prompt-editor", TextArea)
         row, column = editor.cursor_location
         if row >= editor.document.line_count:
             return None
-        before_cursor = editor.document.get_line(row)[:column]
-        match = FILE_COMPLETION_PATTERN.search(before_cursor)
-        if match is None:
-            return None
-        return match.group(1), (row, match.start()), (row, column)
-
-    def _skill_completion_context(
-        self,
-    ) -> tuple[str, tuple[int, int], tuple[int, int]] | None:
-        editor = self.query_one("#prompt-editor", TextArea)
-        row, column = editor.cursor_location
-        if row >= editor.document.line_count:
-            return None
-        before_cursor = editor.document.get_line(row)[:column]
-        match = SKILL_COMPLETION_PATTERN.search(before_cursor)
-        if match is None:
-            return None
-        return (match.group(1) or ""), (row, match.start()), (row, column)
-
-    def _template_completion_context(
-        self,
-    ) -> tuple[str, tuple[int, int], tuple[int, int]] | None:
-        editor = self.query_one("#prompt-editor", TextArea)
-        row, column = editor.cursor_location
-        if row >= editor.document.line_count:
-            return None
-        before_cursor = editor.document.get_line(row)[:column]
-        match = PROMPT_COMPLETION_PATTERN.search(before_cursor)
-        if match is None:
-            return None
-        return (match.group(1) or ""), (row, match.start()), (row, column)
+        return find_completion_context(
+            kind,
+            editor.document.get_line(row),
+            row,
+            column,
+        )
 
     def _update_completions(self) -> None:
-        if self._skill_completion_context() is not None:
+        if self._completion_context("slash") is not None:
+            self._cancel_system_completion_search()
+            self._update_slash_completions()
+        elif self._completion_context("skill") is not None:
             self._cancel_system_completion_search()
             self._update_skill_completions()
-        elif self._template_completion_context() is not None:
+        elif self._completion_context("template") is not None:
             self._cancel_system_completion_search()
             self._update_template_completions()
         else:
@@ -704,11 +684,11 @@ class GhostwriterApp(App[None]):
 
     def _update_file_completions(self) -> None:
         self._cancel_system_completion_search()
-        context = self._file_completion_context()
+        context = self._completion_context("file")
         if context is None:
             self._hide_completions()
             return
-        query, _, _ = context
+        query = context.query
         if any(attachment.editor_token == f"@{query}" for attachment in self.draft.attachments):
             self._hide_completions()
             return
@@ -832,8 +812,8 @@ class GhostwriterApp(App[None]):
         ):
             self._system_completion_cache.pop(next(iter(self._system_completion_cache)))
         self._system_completion_cache[cache_key] = system_candidates
-        context = self._file_completion_context()
-        if context is None or context[0] != query or self._project_root() != root:
+        context = self._completion_context("file")
+        if context is None or context.query != query or self._project_root() != root:
             return
         project_paths = {candidate.path for candidate in project_candidates}
         combined = project_candidates + [
@@ -843,82 +823,69 @@ class GhostwriterApp(App[None]):
         ]
         self._show_file_completions(combined[:12])
 
-    def _update_skill_completions(self) -> None:
-        context = self._skill_completion_context()
-        target = self._selected_target()
-        if context is None or target is None:
-            self._hide_completions()
-            return
-        query, _, _ = context
-        lowered = query.casefold()
-        candidates = [
-            skill for skill in target.skills if skill.name.casefold().startswith(lowered)
-        ]
-        if not candidates:
-            candidates = [skill for skill in target.skills if lowered in skill.name.casefold()]
+    def _show_named_completions(
+        self,
+        kind: Literal["slash", "skill", "template"],
+        candidates: Sequence[NamedCompletion],
+        token_prefix: str,
+        *,
+        token_suffix: str = "",
+    ) -> None:
         if not candidates:
             self._hide_completions()
             return
-
-        visible_candidates = candidates[:12]
-        self._completion_candidates = list(visible_candidates)
-        self._completion_kind = "skill"
+        self._completion_candidates = list(candidates)
+        self._completion_kind = kind
         options = self.query_one("#prompt-completions", OptionList)
         options.clear_options()
-        skill_options: list[Option] = []
-        for index, skill in enumerate(visible_candidates):
+        rendered: list[Option] = []
+        for index, candidate in enumerate(candidates):
             prompt = Text(no_wrap=True, overflow="ellipsis")
-            prompt.append(skill.token, style=Style(bold=True))
-            description = " ".join(skill.description.split())
+            prompt.append(
+                f"{token_prefix}{candidate.name}{token_suffix}",
+                style=Style(bold=True),
+            )
+            description = " ".join(candidate.description.split())
             if description:
                 prompt.append("\n")
                 prompt.append(description, style=Style(dim=True))
-            skill_options.append(Option(prompt, id=str(index)))
-        options.add_options(skill_options)
+            rendered.append(Option(prompt, id=str(index)))
+        options.add_options(rendered)
         options.styles.height = 8
         options.highlighted = 0
         options.display = True
+
+    def _update_slash_completions(self) -> None:
+        context = self._completion_context("slash")
+        candidates = (
+            filter_named_completions(
+                context.query,
+                SLASH_COMPLETIONS,
+                allow_infix=False,
+            )
+            if context is not None
+            else []
+        )
+        self._show_named_completions("slash", candidates, "/", token_suffix=":")
+
+    def _update_skill_completions(self) -> None:
+        context = self._completion_context("skill")
+        target = self._selected_target()
+        candidates = (
+            filter_named_completions(context.query, target.skills)
+            if context is not None and target is not None
+            else []
+        )
+        self._show_named_completions("skill", candidates, "/skill:")
 
     def _update_template_completions(self) -> None:
-        context = self._template_completion_context()
-        if context is None:
-            self._hide_completions()
-            return
-        query, _, _ = context
-        lowered = query.casefold()
-        candidates = [
-            template
-            for template in self.prompt_templates
-            if template.name.casefold().startswith(lowered)
-        ]
-        if not candidates:
-            candidates = [
-                template
-                for template in self.prompt_templates
-                if lowered in template.name.casefold()
-            ]
-        if not candidates:
-            self._hide_completions()
-            return
-
-        visible_candidates = candidates[:12]
-        self._completion_candidates = list(visible_candidates)
-        self._completion_kind = "template"
-        options = self.query_one("#prompt-completions", OptionList)
-        options.clear_options()
-        template_options: list[Option] = []
-        for index, template in enumerate(visible_candidates):
-            prompt = Text(no_wrap=True, overflow="ellipsis")
-            prompt.append(template.reference, style=Style(bold=True))
-            description = " ".join(template.description.split())
-            if description:
-                prompt.append("\n")
-                prompt.append(description, style=Style(dim=True))
-            template_options.append(Option(prompt, id=str(index)))
-        options.add_options(template_options)
-        options.styles.height = 8
-        options.highlighted = 0
-        options.display = True
+        context = self._completion_context("template")
+        candidates = (
+            filter_named_completions(context.query, self.prompt_templates)
+            if context is not None
+            else []
+        )
+        self._show_named_completions("template", candidates, "/prompt:")
 
     def _hide_completions(self) -> None:
         self._completion_candidates = []
@@ -950,16 +917,38 @@ class GhostwriterApp(App[None]):
             self._accept_skill_completion(index)
         elif self._completion_kind == "template":
             self._accept_template_completion(index)
+        elif self._completion_kind == "slash":
+            self._accept_slash_completion(index)
+
+    def _accept_slash_completion(self, index: int) -> None:
+        if index < 0 or index >= len(self._completion_candidates):
+            return
+        candidate = self._completion_candidates[index]
+        context = self._completion_context("slash")
+        if context is None or not isinstance(candidate, SlashCompletion):
+            self._hide_completions()
+            return
+        start, end = context.start, context.end
+        editor = self.query_one("#prompt-editor", TextArea)
+        result = editor.replace(
+            candidate.token,
+            start,
+            end,
+            maintain_selection_offset=False,
+        )
+        editor.move_cursor(result.end_location)
+        self._update_completions()
+        editor.focus()
 
     def _accept_file_completion(self, index: int) -> None:
         if index < 0 or index >= len(self._completion_candidates):
             return
         candidate = self._completion_candidates[index]
-        context = self._file_completion_context()
+        context = self._completion_context("file")
         if context is None or not isinstance(candidate, FileCompletion):
             self._hide_completions()
             return
-        _, start, end = context
+        start, end = context.start, context.end
         editor = self.query_one("#prompt-editor", TextArea)
         result = editor.replace("", start, end, maintain_selection_offset=False)
         editor.move_cursor(result.end_location)
@@ -974,11 +963,11 @@ class GhostwriterApp(App[None]):
         if index < 0 or index >= len(self._completion_candidates):
             return
         candidate = self._completion_candidates[index]
-        context = self._skill_completion_context()
+        context = self._completion_context("skill")
         if context is None or not isinstance(candidate, PiSkill):
             self._hide_completions()
             return
-        _, start, end = context
+        start, end = context.start, context.end
         editor = self.query_one("#prompt-editor", TextArea)
         row, column = end
         line = editor.document.get_line(row)
@@ -997,11 +986,11 @@ class GhostwriterApp(App[None]):
         if index < 0 or index >= len(self._completion_candidates):
             return
         candidate = self._completion_candidates[index]
-        context = self._template_completion_context()
+        context = self._completion_context("template")
         if context is None or not isinstance(candidate, PromptTemplate):
             self._hide_completions()
             return
-        _, start, end = context
+        start, end = context.start, context.end
         editor = self.query_one("#prompt-editor", TextArea)
         row, column = end
         line = editor.document.get_line(row)

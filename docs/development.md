@@ -98,10 +98,12 @@ A local install stores the resolved repository path in Pi's user settings. Git a
 
 ## Testing strategy
 
-- `tests/test_app.py`: Textual interaction, autocomplete, attachments, previews, responsive layout, and real geometry changes from divider drags
-- `tests/test_files.py`: path parsing, indexing, completion, and preview bounds
+- `tests/test_app.py`: Textual interactions, autocomplete integration, attachments, previews, responsive layout, and real geometry changes from divider drags
+- `tests/test_completions.py`: inline grammar, slash routing, and name filtering
+- `tests/test_files.py`: path parsing, indexing, file completion, and preview bounds
+- `tests/test_model.py`: draft migration and attachment-marker behavior
 - `tests/test_pi.py`: serialization, target metadata, discovery, stale cleanup, and socket exchange
-- `tests/test_storage.py`: state migration, atomic persistence behavior, and legacy cache cleanup
+- `tests/test_storage.py`: atomic draft persistence and legacy cache cleanup
 - `tests/rewrite/`: RPC framing, placeholder integrity, service prompts, and modal controls
 
 Tests use temporary state paths. New tests should not depend on the user's live draft, Pi registry, or cache.

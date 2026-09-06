@@ -4,6 +4,8 @@ All notable changes to Ghostwriter will be documented here. The project follows 
 
 ## Unreleased
 
+- Added a `/` completion menu that routes `/s` to `/skill:` and `/p` to `/prompt:`, then opens the corresponding Skill or Prompt list after Tab completion.
+- Separated completion grammar and filtering from Textual rendering, added focused unit coverage, and aligned model and storage tests with their source-module boundaries.
 - Changed in-project attachment markers from ambiguous basenames to paths relative to the selected Pi working directory.
 - Added simple Prompt templates from a configurable, separately defaulted directory, with optional descriptions, a compact insert/expand picker, Settings-based folder refresh, `/prompt:<name>` completion aligned with Skills, direct `F3` expansion, and preserved line breaks.
 - Prevented the horizontal split from pushing the side pane beyond the viewport, removed the redundant app-name header, and renamed **Reload config** to **Refresh**; the broader command also refreshes targets, Prompt templates, Skills, and file indexes.

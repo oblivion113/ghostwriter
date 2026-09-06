@@ -73,13 +73,13 @@ Preserve important details.
 
 Choose **Prompts** to browse templates by bold name and description. **Insert** adds a highlighted `/prompt:<name>` reference such as `/prompt:review` at the cursor, **Expand** replaces every inserted reference in place, and **Open folder** opens the configured template directory. Use **Settings → Refresh** after adding or deleting templates; `F3` performs expansion directly.
 
-The inline workflow mirrors Skill insertion: type `/prompt:` followed by part of a template name, then choose a match with Tab or a click. Add as many references as needed and arrange them within the draft before expanding them. Body line breaks and surrounding draft text are preserved.
+Inline completion starts with `/`, which lists the Prompt and Skill routes. Type `/p` and press Tab to complete `/prompt:` and open the template list; then type part of a template name and press Tab again, or click a match, to insert `/prompt:<name>`. You can also type the full `/prompt:` prefix directly. Add as many references as needed and arrange them within the draft before expanding them. Body line breaks and surrounding draft text are preserved.
 
 Template bodies are inserted literally. Ghostwriter deliberately does not interpret Pi argument placeholders such as `$1` or `${@:2}` because Pi has no supported extension hook that exposes its post-expansion text without starting an Agent turn. Discovery is non-recursive.
 
 ### Skills
 
-Type `/skill` or `/skill:<partial-name>` after whitespace anywhere in your draft. Ghostwriter shows the Skills loaded by the selected Pi session, including a short description, and lets you complete the highlighted result with Tab or a click.
+Type `/` after whitespace anywhere in your draft to see the Prompt and Skill routes. Type `/s` and press Tab to complete `/skill:` and open the selected Pi session's Skill list. Continue with part of a Skill name, then press Tab again or click a match. You can also type `/skill:<partial-name>` directly. Each Skill includes a short description.
 
 ```text
 First review the architecture, then use /skill:teaching for the explanation.
@@ -111,7 +111,7 @@ See [`docs/rewrite.md`](docs/rewrite.md) for isolation, placeholder integrity, a
 | `F4` | Open Translate / Tidy |
 | `Ctrl+Q` | Quit |
 | `Up` / `Down` | Move through an open completion list |
-| `Tab` | Accept the highlighted `@`, `/prompt:`, or `/skill:` completion |
+| `Tab` | Accept the highlighted route, `@` path, Prompt, or Skill completion |
 | `Escape` | Close the completion list or cancel a dialog |
 
 

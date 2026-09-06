@@ -234,6 +234,66 @@ async def test_narrow_side_pane_scrolls_to_hidden_controls(tmp_path: Path) -> No
 
 
 @pytest.mark.asyncio
+async def test_slash_completion_routes_to_skills_and_prompts(tmp_path: Path) -> None:
+    prompts = tmp_path / "prompts"
+    prompts.mkdir()
+    (prompts / "review.md").write_text(
+        "---\nname: review\ndescription: Review carefully\n---\nReview this.",
+        encoding="utf-8",
+    )
+    target = PiTarget(
+        pid=42,
+        session_id="abcdef123456",
+        cwd=tmp_path,
+        socket_path=tmp_path / "pi.sock",
+        skills=(PiSkill("teaching", "Explains concepts for beginners."),),
+    )
+    config_store = ConfigStore(tmp_path / "config.json")
+    config_store.save(
+        GhostwriterConfig(
+            prompt_templates=PromptTemplateConfig(directory=prompts)
+        )
+    )
+    app = GhostwriterApp(config_store=config_store)
+    app.draft = Draft(text="")
+    app.store = DraftStore(tmp_path / "draft.json")
+    app.pi.discover_targets = lambda: [target]  # type: ignore[method-assign]
+
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+        editor = app.query_one("#prompt-editor")
+        options = app.query_one("#prompt-completions")
+
+        editor.focus()
+        await pilot.press("/")
+        await pilot.pause()
+        assert [option.prompt.plain for option in options.options] == [
+            "/skill:\nBrowse Skills available in the selected Pi session",
+            "/prompt:\nBrowse Prompt templates",
+        ]
+
+        await pilot.press("s")
+        await pilot.pause()
+        assert options.option_count == 1
+        assert options.options[0].prompt.plain.startswith("/skill:")
+        await pilot.press("tab")
+        await pilot.pause()
+        assert editor.text == "/skill:"
+        assert options.options[0].prompt.plain == (
+            "/skill:teaching\nExplains concepts for beginners."
+        )
+
+        editor.load_text("/p")
+        editor.cursor_location = (0, 2)
+        app._update_completions()
+        assert options.option_count == 1
+        assert options.options[0].prompt.plain.startswith("/prompt:")
+        assert app._handle_completion_key("tab")
+        assert editor.text == "/prompt:"
+        assert options.options[0].prompt.plain == "/prompt:review\nReview carefully"
+
+
+@pytest.mark.asyncio
 async def test_skill_completion_works_mid_prompt_and_styles_inserted_token(tmp_path: Path) -> None:
     target = PiTarget(
         pid=42,
