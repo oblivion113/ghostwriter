@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from ghostwriter.model import Attachment, Draft
+from ghostwriter.model import Attachment, Draft, refresh_attachment_editor_paths
 from ghostwriter.storage import DraftStore, clear_legacy_image_cache
 
 
@@ -8,7 +8,7 @@ def test_draft_store_round_trip(tmp_path: Path) -> None:
     store = DraftStore(tmp_path / "state" / "draft.json")
     draft = Draft(
         text="hello",
-        attachments=[Attachment("file", "/tmp/source")],
+        attachments=[Attachment("file", "/tmp/source", editor_path="/tmp/source")],
         revision=4,
     )
 
@@ -34,6 +34,30 @@ def test_version_one_draft_migrates_verbose_attachment_marker() -> None:
 
     assert restored.text == "Review @context.md"
     assert restored.attachments[0].editor_token == "@context.md"
+
+
+def test_attachment_editor_paths_follow_root_and_display_mode(tmp_path: Path) -> None:
+    project = tmp_path / "project"
+    inside = Attachment("file", str(project / "inside.md"))
+    outside = Attachment("file", str(tmp_path / "outside.md"))
+    attachments = [inside, outside]
+
+    text, changed = refresh_attachment_editor_paths(
+        "Review @inside.md and @outside.md",
+        attachments,
+        project,
+        "auto",
+    )
+
+    assert changed
+    assert text == f"Review @inside.md and @{tmp_path.as_posix()}/outside.md"
+
+    text, changed = refresh_attachment_editor_paths(text, attachments, project, "full")
+
+    assert changed
+    assert text == (
+        f"Review @{project.as_posix()}/inside.md and @{tmp_path.as_posix()}/outside.md"
+    )
 
 
 def test_legacy_image_cache_is_removed(tmp_path: Path) -> None:
@@ -86,6 +110,6 @@ def test_version_two_draft_discards_staged_attachment_path() -> None:
         }
     )
 
-    assert restored.to_dict()["version"] == 4
+    assert restored.to_dict()["version"] == 5
     assert restored.attachments[0].source == Path("/private/source.png")
     assert "injected_path" not in restored.attachments[0].to_dict()

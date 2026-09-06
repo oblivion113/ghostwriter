@@ -8,7 +8,8 @@ Ghostwriter is a Pi-only terminal prompt composer: it composes locally, transfor
 
 - `src/ghostwriter/app.py`: Textual UI and interaction orchestration
 - `src/ghostwriter/model.py`: persisted draft and attachment model
-- `src/ghostwriter/files.py`: path discovery, completion, native picker, and text previews
+- `src/ghostwriter/files.py`: project discovery, completion ranking, native picker, and text previews
+- `src/ghostwriter/system_search.py`: bounded and cancellable operating-system file-index queries
 - `src/ghostwriter/pi.py`: Pi target discovery, serialization, and Unix-socket client
 - `src/ghostwriter/rewrite/`: isolated Pi RPC rewrite workflow and placeholder integrity
 - `extensions/ghostwriter.ts`: Pi extension, target registry, and editor injection server

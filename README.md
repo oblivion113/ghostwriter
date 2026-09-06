@@ -44,9 +44,9 @@ For a development-only checkout that does not install the command or modify Pi s
 
 ### Attachments
 
-Drag files into the editor, choose **Attach**, paste a local path, or type `@` to search the selected Pi project's files and folders. `@` search includes paths hidden by Git's local excludes, which keeps untracked local context selectable. Every route creates the same compact marker, such as `@design.md` or `@notes/`.
+Drag files into the editor, choose **Attach**, paste a local path, or type `@` to search the selected Pi project immediately. After three filename characters, Ghostwriter also searches the operating system's indexed files and folders, so typing `@bug1` can find `~/Desktop/bug1-2.png` without a full path. Project matches always appear first, including paths hidden by Git's local excludes.
 
-Ghostwriter keeps the original path in place rather than copying it. Text and images can be previewed locally; at injection time the marker becomes Pi's normal path syntax:
+By default, an attached path inside Pi's working directory gets a compact marker such as `@design.md` or `@notes/`; a path outside it shows its absolute path. Set `fileSearch.pathDisplay` to `full` to show absolute paths for both. Ghostwriter keeps the original path in place rather than copying it. Text and images can be previewed locally; at injection time the marker becomes Pi's normal path syntax:
 
 ```text
 @src/example.ts
@@ -55,7 +55,7 @@ Ghostwriter keeps the original path in place rather than copying it. Text and im
 
 Deleting the final marker removes the attachment automatically. You can also select it in the Attachments pane and choose **Remove**.
 
-`fd` and `fzf` improve indexing and fuzzy ranking when installed, but neither is required. A bounded Python fallback is always available.
+`fd` and `fzf` improve project indexing and fuzzy ranking when installed, but neither is required. A bounded Python fallback handles project search. Whole-computer name search uses the macOS Spotlight index or `locate` on other Unix systems when available.
 
 ### Skills
 

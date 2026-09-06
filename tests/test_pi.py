@@ -54,6 +54,23 @@ def test_inline_attachment_token_is_replaced_in_place(tmp_path: Path) -> None:
     assert serialize_draft(draft, tmp_path) == "Before @context.md after"
 
 
+def test_full_editor_paths_with_shared_prefix_serialize_without_orphans(
+    tmp_path: Path,
+) -> None:
+    short = tmp_path / "note"
+    long = tmp_path / "note.md"
+    attachments = [
+        Attachment("file", str(short), editor_path=short.as_posix()),
+        Attachment("file", str(long), editor_path=long.as_posix()),
+    ]
+    draft = Draft(
+        text=f"Compare {attachments[0].editor_token} and {attachments[1].editor_token}",
+        attachments=attachments,
+    )
+
+    assert serialize_draft(draft, tmp_path) == "Compare @note and @note.md"
+
+
 def test_file_reference_rejects_unrepresentable_path(tmp_path: Path) -> None:
     with pytest.raises(ValueError, match="cannot safely represent"):
         format_file_reference(tmp_path / 'bad"name.txt', tmp_path)

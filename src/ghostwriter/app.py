@@ -19,6 +19,7 @@ from textual.events import Resize
 from textual.message import Message
 from textual.screen import Screen
 from textual.theme import Theme, ThemeProvider
+from textual.timer import Timer
 from textual.widgets import (
     Button,
     DataTable,
@@ -31,19 +32,33 @@ from textual.widgets import (
 )
 from textual.widgets.option_list import Option
 from textual.widgets.text_area import TextAreaTheme
+from textual.worker import get_current_worker
 from textual_image.widget import Image
 
-from .config import UI_THEMES, ConfigStore, RewriteConfig, UIConfig, open_config_file
+from .config import (
+    UI_THEMES,
+    ConfigStore,
+    FileSearchConfig,
+    RewriteConfig,
+    UIConfig,
+    open_config_file,
+)
 from .files import (
     FileCompletion,
     build_file_index,
+    can_search_system_files,
     choose_native_paths,
     existing_paths,
     find_file_completions,
+    find_system_file_completions,
     looks_like_image,
     read_text_preview,
 )
-from .model import Attachment
+from .model import (
+    Attachment,
+    format_attachment_editor_path,
+    refresh_attachment_editor_paths,
+)
 from .pi import PiBridgeClient, PiSkill, PiTarget
 from .rewrite import (
     PiRpcError,
@@ -58,7 +73,10 @@ from .wrapping import NaturalWrappedDocument
 
 SKILL_TOKEN_PATTERN = re.compile(r"(?<!\S)/skill:[a-z0-9-]+(?=$|\s)")
 SKILL_COMPLETION_PATTERN = re.compile(r"(?<!\S)/skill(?::([^\s]*))?$")
-FILE_COMPLETION_PATTERN = re.compile(r"(?<!\S)@(.*)$")
+FILE_COMPLETION_PATTERN = re.compile(r"(?<!\S)@([^\s]*)$")
+MAX_SYSTEM_COMPLETION_CACHE = 128
+SYSTEM_COMPLETION_DEBOUNCE = 0.12
+SYSTEM_COMPLETION_WORKER_GROUP = "system-file-completion"
 
 
 class DragHandle(Static):
@@ -225,6 +243,8 @@ class GhostwriterApp(App[None]):
         self._completion_kind: Literal["file", "skill"] | None = None
         self._file_index_root: Path | None = None
         self._file_index: list[str] = []
+        self._system_completion_cache: dict[tuple[Path, str], list[FileCompletion]] = {}
+        self._system_completion_timer: Timer | None = None
         self._stacked = False
         self._horizontal_split = 0.74
         self._vertical_split = 0.52
@@ -457,8 +477,10 @@ class GhostwriterApp(App[None]):
         )
         if config.file_search != previous_file_search:
             self._file_index_root = None
+            self._system_completion_cache.clear()
         if self.theme != config.ui.theme:
             self.theme = config.ui.theme
+        self._refresh_attachment_markers()
         if rewrite.keep_rpc_warm and not previous_rewrite.keep_rpc_warm and not self.is_headless:
             self.run_worker(self._warm_rewrite_rpc(), exclusive=True, group="rewrite-warmup")
         return rewrite
@@ -492,6 +514,21 @@ class GhostwriterApp(App[None]):
         for attachment in self.draft.attachments:
             table.add_row(attachment.display_name, key=attachment.id)
 
+    def _refresh_attachment_markers(self) -> None:
+        editor = self._prompt_editor
+        if editor is None or not self.draft.attachments:
+            return
+        text, changed = refresh_attachment_editor_paths(
+            editor.text,
+            self.draft.attachments,
+            self._project_root(),
+            self.config.file_search.path_display,
+        )
+        if changed:
+            editor.load_text(text)
+            self.draft.text = text
+            self.store.save(self.draft)
+
     def _add_attachment(self, path: Path) -> None:
         source = path.expanduser().resolve(strict=True)
         if not source.is_file() and not source.is_dir():
@@ -503,7 +540,16 @@ class GhostwriterApp(App[None]):
             kind = "directory"
         else:
             kind = "image" if looks_like_image(source) else "file"
-        attachment = Attachment(kind=kind, source_path=str(source))
+        attachment = Attachment(
+            kind=kind,
+            source_path=str(source),
+            editor_path=format_attachment_editor_path(
+                source,
+                self._project_root(),
+                is_directory=kind == "directory",
+                path_display=self.config.file_search.path_display,
+            ),
+        )
         if any(item.editor_token == attachment.editor_token for item in self.draft.attachments):
             raise ValueError(f"An attachment named {source.name!r} is already present")
 
@@ -586,11 +632,19 @@ class GhostwriterApp(App[None]):
 
     def _update_completions(self) -> None:
         if self._skill_completion_context() is not None:
+            self._cancel_system_completion_search()
             self._update_skill_completions()
         else:
             self._update_file_completions()
 
+    def _cancel_system_completion_search(self) -> None:
+        if self._system_completion_timer is not None:
+            self._system_completion_timer.stop()
+            self._system_completion_timer = None
+        self.workers.cancel_group(self, SYSTEM_COMPLETION_WORKER_GROUP)
+
     def _update_file_completions(self) -> None:
+        self._cancel_system_completion_search()
         context = self._file_completion_context()
         if context is None:
             self._hide_completions()
@@ -610,18 +664,89 @@ class GhostwriterApp(App[None]):
                 skipped_directories=search.skipped_directories,
                 ignore_files=search.ignore_files,
             )
-        candidates = find_file_completions(
+        search_system = can_search_system_files(query)
+        project_limit = 8 if search_system else 12
+        project_candidates = find_file_completions(
             root,
             query,
             self._file_index,
+            limit=project_limit,
             include_hidden=search.include_hidden,
             fzf_options=search.fzf_options,
             use_global_fzf_options=search.use_global_fzf_options,
         )
+        if project_candidates:
+            self._show_file_completions(project_candidates)
+        else:
+            self._hide_completions()
+
+        if not search_system:
+            return
+        cache_key = (root, query)
+        if cache_key in self._system_completion_cache:
+            self._merge_system_file_completions(
+                query,
+                root,
+                project_candidates,
+                self._system_completion_cache[cache_key],
+            )
+            return
+
+        self._system_completion_timer = self.set_timer(
+            SYSTEM_COMPLETION_DEBOUNCE,
+            lambda: self._start_system_file_search(
+                query,
+                root,
+                project_candidates,
+                search,
+            ),
+        )
+
+    def _start_system_file_search(
+        self,
+        query: str,
+        root: Path,
+        project_candidates: list[FileCompletion],
+        search: FileSearchConfig,
+    ) -> None:
+        self._system_completion_timer = None
+
+        def search_outside_project() -> None:
+            worker = get_current_worker()
+            candidates = find_system_file_completions(
+                root,
+                query,
+                include_hidden=search.include_hidden,
+                skipped_directories=search.skipped_directories,
+                fzf_options=search.fzf_options,
+                use_global_fzf_options=search.use_global_fzf_options,
+                cancelled=lambda: worker.is_cancelled,
+            )
+            if worker.is_cancelled:
+                return
+            try:
+                self.call_from_thread(
+                    self._merge_system_file_completions,
+                    query,
+                    root,
+                    project_candidates,
+                    candidates,
+                )
+            except RuntimeError:
+                pass
+
+        self.run_worker(
+            search_outside_project,
+            thread=True,
+            exclusive=True,
+            group=SYSTEM_COMPLETION_WORKER_GROUP,
+            exit_on_error=False,
+        )
+
+    def _show_file_completions(self, candidates: list[FileCompletion]) -> None:
         if not candidates:
             self._hide_completions()
             return
-
         self._completion_candidates = candidates
         self._completion_kind = "file"
         options = self.query_one("#prompt-completions", OptionList)
@@ -633,6 +758,31 @@ class GhostwriterApp(App[None]):
         options.styles.height = 8
         options.highlighted = 0
         options.display = True
+
+    def _merge_system_file_completions(
+        self,
+        query: str,
+        root: Path,
+        project_candidates: list[FileCompletion],
+        system_candidates: list[FileCompletion],
+    ) -> None:
+        cache_key = (root, query)
+        if (
+            cache_key not in self._system_completion_cache
+            and len(self._system_completion_cache) >= MAX_SYSTEM_COMPLETION_CACHE
+        ):
+            self._system_completion_cache.pop(next(iter(self._system_completion_cache)))
+        self._system_completion_cache[cache_key] = system_candidates
+        context = self._file_completion_context()
+        if context is None or context[0] != query or self._project_root() != root:
+            return
+        project_paths = {candidate.path for candidate in project_candidates}
+        combined = project_candidates + [
+            candidate
+            for candidate in system_candidates
+            if candidate.path not in project_paths
+        ]
+        self._show_file_completions(combined[:12])
 
     def _update_skill_completions(self) -> None:
         context = self._skill_completion_context()
@@ -875,7 +1025,9 @@ class GhostwriterApp(App[None]):
         self._open_file_picker()
 
     def action_refresh_targets(self) -> None:
+        self._cancel_system_completion_search()
         self._file_index_root = None
+        self._system_completion_cache.clear()
         target_select = self.query_one("#target", Select)
         previous = self.selected_target_id
         found = self.pi.discover_targets()
@@ -901,6 +1053,7 @@ class GhostwriterApp(App[None]):
             self.selected_target_id = None
         count = len(self.targets)
         self._set_status(f"Found {count} Pi target{'s' if count != 1 else ''}")
+        self._refresh_attachment_markers()
         self._update_completions()
 
     def action_save(self) -> None:
@@ -944,7 +1097,10 @@ class GhostwriterApp(App[None]):
     def target_changed(self, event: Select.Changed) -> None:
         target_id = None if event.value is Select.NULL else str(event.value)
         self.selected_target_id = target_id if target_id in self.targets else None
+        self._cancel_system_completion_search()
         self._file_index_root = None
+        self._system_completion_cache.clear()
+        self._refresh_attachment_markers()
         self._update_completions()
 
     @on(DataTable.RowHighlighted, "#attachments")

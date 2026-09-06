@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+from collections import Counter
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Literal
 from uuid import uuid4
 
 AttachmentKind = Literal["file", "image", "directory"]
+PathDisplay = Literal["auto", "full"]
 
 
 @dataclass(slots=True)
@@ -13,6 +15,7 @@ class Attachment:
     kind: AttachmentKind
     source_path: str
     id: str = field(default_factory=lambda: uuid4().hex)
+    editor_path: str = ""
 
     @property
     def source(self) -> Path:
@@ -25,7 +28,7 @@ class Attachment:
 
     @property
     def editor_token(self) -> str:
-        return f"@{self.display_name}"
+        return f"@{self.editor_path or self.display_name}"
 
     @property
     def legacy_editor_token(self) -> str:
@@ -47,7 +50,79 @@ class Attachment:
             kind=kind,
             source_path=source_path,
             id=data.get("id") or uuid4().hex,
+            editor_path=data.get("editor_path", ""),
         )
+
+
+def format_attachment_editor_path(
+    source: Path,
+    root: Path,
+    *,
+    is_directory: bool,
+    path_display: PathDisplay,
+) -> str:
+    if path_display == "auto" and source.is_relative_to(root):
+        value = source.name or source.as_posix()
+    else:
+        value = source.as_posix()
+    return value + ("/" if is_directory and not value.endswith("/") else "")
+
+
+def refresh_attachment_editor_paths(
+    text: str,
+    attachments: list[Attachment],
+    root: Path,
+    path_display: PathDisplay,
+) -> tuple[str, bool]:
+    """Update persisted marker paths without letting one marker replace another's prefix."""
+    sources = [attachment.source.resolve() for attachment in attachments]
+    desired = [
+        format_attachment_editor_path(
+            source,
+            root,
+            is_directory=attachment.kind == "directory",
+            path_display=path_display,
+        )
+        for attachment, source in zip(attachments, sources, strict=True)
+    ]
+    duplicates = {path for path, count in Counter(desired).items() if count > 1}
+    if duplicates:
+        desired = [
+            format_attachment_editor_path(
+                source,
+                root,
+                is_directory=attachment.kind == "directory",
+                path_display="full" if path in duplicates else path_display,
+            )
+            for attachment, source, path in zip(
+                attachments,
+                sources,
+                desired,
+                strict=True,
+            )
+        ]
+
+    updates = [
+        (attachment, attachment.editor_token, editor_path)
+        for attachment, editor_path in zip(attachments, desired, strict=True)
+        if attachment.editor_path != editor_path
+    ]
+    if not updates:
+        return text, False
+
+    placeholders: list[tuple[str, str]] = []
+    for attachment, old_token, editor_path in sorted(
+        updates,
+        key=lambda update: len(update[1]),
+        reverse=True,
+    ):
+        placeholder = f"__GW_MARKER_UPDATE_{attachment.id}__"
+        text = text.replace(old_token, placeholder)
+        attachment.editor_path = editor_path
+        placeholders.append((placeholder, attachment.editor_token))
+    for placeholder, new_token in placeholders:
+        text = text.replace(placeholder, new_token)
+    return text, True
 
 
 @dataclass(slots=True)
@@ -59,7 +134,7 @@ class Draft:
 
     def to_dict(self) -> dict[str, object]:
         return {
-            "version": 4,
+            "version": 5,
             "id": self.id,
             "revision": self.revision,
             "text": self.text,

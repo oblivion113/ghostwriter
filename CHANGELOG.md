@@ -4,6 +4,9 @@ All notable changes to Ghostwriter will be documented here. The project follows 
 
 ## Unreleased
 
+- Expanded `@` completion to the operating system's file index, with selected-project matches first plus debounced, bounded, and cancellable background searches.
+- Added configurable attachment path display: compact names inside Pi's working directory and absolute paths outside by default, or full paths everywhere.
+- Fixed crashes from incomplete `~` path expressions and restored additional `@` completions on the same prompt line.
 - Added folder attachments with trailing-slash markers to `@` completion and kept Git-locally-excluded paths searchable.
 - Persisted Theme palette choices through a validated `ui.theme` configuration field.
 - Replaced the auto-loaded `AGENTS.md` with an opt-in agent reference page.

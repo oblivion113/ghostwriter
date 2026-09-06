@@ -4,17 +4,22 @@ import heapq
 import os
 import shlex
 import shutil
+import stat
 import subprocess
 import sys
-from collections.abc import Iterable, Sequence
+from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import unquote, urlparse
+
+from .system_search import search_system_file_index
 
 IMAGE_SUFFIXES = {".bmp", ".gif", ".jpeg", ".jpg", ".png", ".webp"}
 MAX_PREVIEW_BYTES = 128 * 1024
 MAX_PREVIEW_LINES = 2_000
 MAX_INDEXED_FILES = 20_000
+MAX_SYSTEM_CANDIDATES = 20_000
+SYSTEM_SEARCH_MIN_CHARACTERS = 3
 DEFAULT_SKIPPED_DIRECTORIES = (
     ".bun",
     ".cache",
@@ -228,27 +233,31 @@ def find_file_completions(
     fzf_options: Sequence[str] = (),
     use_global_fzf_options: bool = True,
 ) -> list[FileCompletion]:
-    if query.startswith(("/", "~")):
-        expanded = Path(query).expanduser()
+    expanded = _expand_direct_query(query)
+    if expanded is not None:
         parent = expanded if query.endswith("/") else expanded.parent
         prefix = "" if query.endswith("/") else expanded.name.lower()
         try:
-            children = sorted(parent.iterdir(), key=lambda path: (not path.is_dir(), path.name.lower()))
+            children = [
+                (child, child.is_dir())
+                for child in parent.iterdir()
+                if include_hidden or not child.name.startswith(".")
+            ]
         except OSError:
             return []
+        children.sort(key=lambda item: (not item[1], item[0].name.lower()))
         matches = [
-            child
-            for child in children
-            if (include_hidden or not child.name.startswith("."))
-            and child.name.lower().startswith(prefix)
+            (child, is_directory)
+            for child, is_directory in children
+            if child.name.lower().startswith(prefix)
         ]
         return [
             FileCompletion(
                 child,
-                child.as_posix() + ("/" if child.is_dir() else ""),
-                child.is_dir(),
+                child.as_posix() + ("/" if is_directory else ""),
+                is_directory,
             )
-            for child in matches[:limit]
+            for child, is_directory in matches[:limit]
         ]
 
     needle = query.removeprefix("./")
@@ -294,6 +303,98 @@ def find_file_completions(
     ]
 
 
+def _expand_direct_query(query: str) -> Path | None:
+    if not query.startswith(("/", "~")):
+        return None
+    try:
+        return Path(query).expanduser()
+    except (OSError, RuntimeError):
+        # An incomplete or mistyped user expression such as `~.` is still editable.
+        return None
+
+
+def can_search_system_files(query: str) -> bool:
+    return (
+        len(query) >= SYSTEM_SEARCH_MIN_CHARACTERS
+        and not query.startswith(("/", "~"))
+        and "/" not in query
+        and "\\" not in query
+    )
+
+
+def find_system_file_completions(
+    root: Path,
+    query: str,
+    *,
+    limit: int = 12,
+    include_hidden: bool = False,
+    skipped_directories: Sequence[str] = DEFAULT_SKIPPED_DIRECTORIES,
+    fzf_options: Sequence[str] = (),
+    use_global_fzf_options: bool = True,
+    cancelled: Callable[[], bool] | None = None,
+) -> list[FileCompletion]:
+    """Find paths outside the project through the operating system's file index."""
+    if not can_search_system_files(query) or (cancelled is not None and cancelled()):
+        return []
+
+    root = root.expanduser().resolve()
+    raw_paths = search_system_file_index(
+        query,
+        limit=MAX_SYSTEM_CANDIDATES,
+        timeout=1,
+        cancelled=cancelled,
+    )
+    skipped = frozenset(skipped_directories)
+    candidates: list[str] = []
+    seen: set[str] = set()
+    for raw_path in raw_paths:
+        path = Path(raw_path)
+        if not path.is_absolute() or raw_path in seen:
+            continue
+        seen.add(raw_path)
+        if path.is_relative_to(root):
+            continue
+        parts = path.parts[1:]
+        if any(part in skipped for part in parts):
+            continue
+        if not include_hidden and any(part.startswith(".") for part in parts):
+            continue
+        candidates.append(raw_path)
+        if len(candidates) >= MAX_SYSTEM_CANDIDATES:
+            break
+
+    if cancelled is not None and cancelled():
+        return []
+    ranked = _rank_with_fzf(
+        query,
+        candidates,
+        fzf_options=fzf_options,
+        use_global_options=use_global_fzf_options,
+        limit=limit * 4,
+    )
+    paths = candidates if ranked is None else ranked
+    completions: list[FileCompletion] = []
+    for raw_path in paths:
+        path = Path(raw_path)
+        try:
+            mode = path.stat().st_mode
+        except OSError:
+            continue
+        is_directory = stat.S_ISDIR(mode)
+        if not is_directory and not stat.S_ISREG(mode):
+            continue
+        completions.append(
+            FileCompletion(
+                path,
+                path.as_posix() + ("/" if is_directory else ""),
+                is_directory,
+            )
+        )
+        if len(completions) >= limit:
+            break
+    return completions
+
+
 def _rank_with_fzf(
     query: str,
     relative_paths: Sequence[str],
@@ -305,6 +406,8 @@ def _rank_with_fzf(
     fzf = shutil.which("fzf")
     if fzf is None:
         return None
+    if not relative_paths:
+        return []
 
     source = b"\0".join(os.fsencode(relative) for relative in relative_paths)
     if source:
@@ -338,6 +441,7 @@ def _rank_with_fzf(
         return None
 
     matches: list[str] = []
+    allowed = frozenset(relative_paths)
     start = 0
     while len(matches) < limit:
         end = result.stdout.find(b"\0", start)
@@ -348,7 +452,7 @@ def _rank_with_fzf(
         if not raw_match:
             continue
         relative = os.fsdecode(raw_match)
-        if relative in relative_paths:
+        if relative in allowed:
             matches.append(relative)
     return matches
 

@@ -13,6 +13,7 @@ from typing import Any
 from platformdirs import user_config_path
 
 from .files import DEFAULT_SKIPPED_DIRECTORIES
+from .model import PathDisplay
 
 CONFIG_VERSION = 1
 DEFAULT_THEME = "textual-dark"
@@ -163,6 +164,7 @@ class RewriteConfig:
 class FileSearchConfig:
     include_hidden: bool = False
     use_global_fzf_options: bool = True
+    path_display: PathDisplay = "auto"
     skipped_directories: tuple[str, ...] = DEFAULT_SKIPPED_DIRECTORIES
     ignore_files: tuple[Path, ...] = ()
     fzf_options: tuple[str, ...] = ()
@@ -173,6 +175,7 @@ class FileSearchConfig:
             raise TypeError("fileSearch must be an object")
         include_hidden = data.get("includeHidden", False)
         use_global_options = data.get("useGlobalFzfOptions", True)
+        path_display = data.get("pathDisplay", "auto")
         skipped_data = data.get("skipDirectories", list(DEFAULT_SKIPPED_DIRECTORIES))
         ignore_data = data.get("ignoreFiles", [])
         options_data = data.get("fzfOptions", [])
@@ -180,6 +183,8 @@ class FileSearchConfig:
             raise TypeError("fileSearch.includeHidden must be true or false")
         if not isinstance(use_global_options, bool):
             raise TypeError("fileSearch.useGlobalFzfOptions must be true or false")
+        if path_display not in {"auto", "full"}:
+            raise ValueError("fileSearch.pathDisplay must be 'auto' or 'full'")
         if not isinstance(skipped_data, list) or not all(
             isinstance(item, str) and item.strip() for item in skipped_data
         ):
@@ -200,6 +205,7 @@ class FileSearchConfig:
         return cls(
             include_hidden=include_hidden,
             use_global_fzf_options=use_global_options,
+            path_display=path_display,
             skipped_directories=skipped,
             ignore_files=tuple(Path(item).expanduser() for item in ignore_data),
             fzf_options=tuple(item.strip() for item in options_data),
@@ -209,6 +215,7 @@ class FileSearchConfig:
         return {
             "includeHidden": self.include_hidden,
             "useGlobalFzfOptions": self.use_global_fzf_options,
+            "pathDisplay": self.path_display,
             "skipDirectories": list(self.skipped_directories),
             "ignoreFiles": [str(path) for path in self.ignore_files],
             "fzfOptions": list(self.fzf_options),

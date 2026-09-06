@@ -27,6 +27,7 @@ This focused example is valid; omitted fields use their defaults:
   "fileSearch": {
     "includeHidden": false,
     "useGlobalFzfOptions": true,
+    "pathDisplay": "auto",
     "ignoreFiles": [],
     "fzfOptions": []
   },
@@ -55,13 +56,16 @@ The generated file also contains the full default `skipDirectories` list and rew
 | --- | --- |
 | `includeHidden` | Include hidden files and folders during `@` search. Defaults to `false`. |
 | `useGlobalFzfOptions` | Inherit `FZF_DEFAULT_OPTS` and `FZF_DEFAULT_OPTS_FILE`. Set it to `false` for app-only behavior. |
-| `skipDirectories` | Directory names omitted by both `fd` and the Python fallback, such as `.git`, `node_modules`, caches, and build outputs. Entries must be unique names, not paths. |
+| `pathDisplay` | `auto` shows a filename for paths inside Pi's working directory and an absolute path for paths outside it. `full` always shows an absolute path. |
+| `skipDirectories` | Directory names omitted by project and system-index search, such as `.git`, `node_modules`, caches, and build outputs. Entries must be unique names, not paths. |
 | `ignoreFiles` | Additional gitignore-format files passed to `fd`. Paths may use `~`. |
 | `fzfOptions` | Extra command-line arguments used for non-interactive `fzf --filter` ranking. |
 
-Git's VCS ignore rules do not hide `@` candidates, so local context listed in `.git/info/exclude` remains selectable. The explicit `skipDirectories` and `ignoreFiles` settings still remove unwanted paths, and hidden paths remain controlled by `includeHidden`.
+Git's VCS ignore rules do not hide project `@` candidates, so local context listed in `.git/info/exclude` remains selectable. The explicit `skipDirectories` and `ignoreFiles` settings still remove unwanted project paths, and hidden paths remain controlled by `includeHidden`.
 
-`fd` and `fzf` are optional. If either operation is unavailable or fails, Ghostwriter uses its bounded Python search and ranking fallback.
+Project completion starts immediately after `@`. Once a filename query reaches three characters, Ghostwriter also searches outside the working directory through Spotlight on macOS or `locate` on other Unix systems. These indexed lookups are debounced, bounded, and run in a cancellable background worker; project candidates remain ahead of system candidates. `/` and `~` queries retain direct path completion.
+
+`fd` and `fzf` are optional. If either operation is unavailable or fails, Ghostwriter uses its bounded Python project search and ranking fallback. Whole-computer results require an available operating-system file index.
 
 ## Rewrite settings
 

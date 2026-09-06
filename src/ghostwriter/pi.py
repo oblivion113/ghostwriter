@@ -99,14 +99,27 @@ def format_file_reference(path: Path, cwd: Path) -> str:
 
 def serialize_draft(draft: Draft, cwd: Path) -> str:
     text = draft.text.rstrip()
-    orphaned_references: list[str] = []
-    for attachment in draft.attachments:
-        reference = format_file_reference(attachment.source, cwd)
-        if attachment.editor_token in text:
-            text = text.replace(attachment.editor_token, reference)
-        else:
-            orphaned_references.append(reference)
+    inline_ids: set[str] = set()
+    replacements: list[tuple[str, str]] = []
+    for attachment in sorted(
+        draft.attachments,
+        key=lambda item: len(item.editor_token),
+        reverse=True,
+    ):
+        if attachment.editor_token not in text:
+            continue
+        placeholder = f"__GW_SERIALIZED_ATTACHMENT_{attachment.id}__"
+        text = text.replace(attachment.editor_token, placeholder)
+        replacements.append((placeholder, format_file_reference(attachment.source, cwd)))
+        inline_ids.add(attachment.id)
+    for placeholder, reference in replacements:
+        text = text.replace(placeholder, reference)
 
+    orphaned_references = [
+        format_file_reference(attachment.source, cwd)
+        for attachment in draft.attachments
+        if attachment.id not in inline_ids
+    ]
     if not orphaned_references:
         return text
 

@@ -23,6 +23,7 @@ def test_config_store_creates_editable_defaults(tmp_path: Path) -> None:
     assert config.ui.theme == "textual-dark"
     assert config.file_search.include_hidden is False
     assert config.file_search.use_global_fzf_options
+    assert config.file_search.path_display == "auto"
     assert "node_modules" in config.file_search.skipped_directories
     assert "fileSearch" in path.read_text(encoding="utf-8")
     assert not config.rewrite.keep_rpc_warm
@@ -43,6 +44,7 @@ def test_config_loads_agents_languages_and_custom_prompt(tmp_path: Path) -> None
                 "fileSearch": {
                     "includeHidden": True,
                     "useGlobalFzfOptions": False,
+                    "pathDisplay": "full",
                     "skipDirectories": ["node_modules", "__pycache__"],
                     "ignoreFiles": ["~/.config/search/ignore"],
                     "fzfOptions": ["--exact"],
@@ -70,6 +72,7 @@ def test_config_loads_agents_languages_and_custom_prompt(tmp_path: Path) -> None
     assert config.ui.theme == "nord"
     assert config.file_search.include_hidden
     assert not config.file_search.use_global_fzf_options
+    assert config.file_search.path_display == "full"
     assert config.file_search.fzf_options == ("--exact",)
     assert config.file_search.ignore_files[0].is_absolute()
     assert config.rewrite.keep_rpc_warm
@@ -102,6 +105,13 @@ def test_legacy_named_default_agent_is_migrated_to_first_provider_model() -> Non
 def test_config_rejects_unknown_theme() -> None:
     with pytest.raises(ValueError, match="ui.theme"):
         GhostwriterConfig.from_dict({"version": 1, "ui": {"theme": "unknown"}})
+
+
+def test_config_rejects_unknown_attachment_path_display() -> None:
+    with pytest.raises(ValueError, match="fileSearch.pathDisplay"):
+        GhostwriterConfig.from_dict(
+            {"version": 1, "fileSearch": {"pathDisplay": "relative"}}
+        )
 
 
 def test_config_reload_reports_invalid_edits_without_replacing_them(tmp_path: Path) -> None:

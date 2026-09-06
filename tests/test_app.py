@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
 
 import pytest
@@ -26,6 +27,7 @@ async def test_adding_file_inserts_marker_at_cursor(tmp_path: Path) -> None:
     app.store = DraftStore(tmp_path / "draft.json")
 
     async with app.run_test(size=(120, 40)) as pilot:
+        app._project_root = lambda: tmp_path
         editor = app.query_one("#prompt-editor")
         editor.cursor_location = (0, 6)
         app._add_attachment(source)
@@ -72,7 +74,7 @@ async def test_pasting_file_path_into_prompt_creates_attachment(tmp_path: Path) 
         attachment = app.draft.attachments[0]
         assert attachment.kind == "file"
         assert attachment.editor_token in editor.text
-        assert str(source) not in editor.text
+        assert attachment.editor_token == f"@{source.as_posix()}"
 
 
 @pytest.mark.asyncio
@@ -298,6 +300,64 @@ async def test_at_completion_attaches_project_file_with_compact_marker(tmp_path:
         assert editor.text == "Review @context.md "
         assert app.draft.attachments[0].source == source.resolve()
         assert app.query_one("#attachments").row_count == 1
+
+
+@pytest.mark.asyncio
+async def test_second_at_completion_works_on_the_same_line(tmp_path: Path) -> None:
+    first = tmp_path / "first-context.md"
+    second = tmp_path / "second-context.md"
+    first.write_text("first", encoding="utf-8")
+    second.write_text("second", encoding="utf-8")
+    app = GhostwriterApp()
+    app.draft = Draft(text="")
+    app.store = DraftStore(tmp_path / "draft.json")
+
+    async with app.run_test(size=(120, 40)) as pilot:
+        app._project_root = lambda: tmp_path
+        app._add_attachment(first)
+        editor = app.query_one("#prompt-editor")
+        editor.insert("and @second")
+        app._update_file_completions()
+
+        assert app.query_one("#prompt-completions").display
+        assert app._handle_completion_key("tab")
+        await pilot.pause()
+
+        assert editor.text == "@first-context.md and @second-context.md "
+        assert [attachment.source for attachment in app.draft.attachments] == [
+            first.resolve(),
+            second.resolve(),
+        ]
+
+
+@pytest.mark.asyncio
+async def test_system_file_search_is_debounced_while_typing(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[str] = []
+
+    def find_system(_root: Path, query: str, **_kwargs: object) -> list[object]:
+        calls.append(query)
+        return []
+
+    monkeypatch.setattr("ghostwriter.app.SYSTEM_COMPLETION_DEBOUNCE", 0.01)
+    monkeypatch.setattr("ghostwriter.app.find_system_file_completions", find_system)
+    app = GhostwriterApp()
+    app.draft = Draft(text="")
+    app.store = DraftStore(tmp_path / "draft.json")
+
+    async with app.run_test(size=(120, 40)):
+        app._project_root = lambda: tmp_path
+        app._file_index_root = tmp_path
+        editor = app.query_one("#prompt-editor")
+        for query in ("bug", "bug1"):
+            editor.load_text(f"@{query}")
+            editor.cursor_location = (0, len(query) + 1)
+            app._update_file_completions()
+        await asyncio.sleep(0.05)
+
+        assert calls == ["bug1"]
 
 
 @pytest.mark.asyncio

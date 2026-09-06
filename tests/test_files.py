@@ -11,6 +11,7 @@ from ghostwriter.files import (
     build_file_index,
     existing_paths,
     find_file_completions,
+    find_system_file_completions,
     read_text_preview,
 )
 
@@ -115,6 +116,10 @@ def test_fzf_ranks_non_contiguous_path_matches(
     assert matches == [FileCompletion(source, "src/ghostwriter/app.py")]
 
 
+def test_incomplete_home_query_remains_editable(tmp_path: Path) -> None:
+    assert find_file_completions(tmp_path, "~.", []) == []
+
+
 def test_file_completions_search_project_and_absolute_paths(tmp_path: Path) -> None:
     source = tmp_path / "src" / "candidate_prompt.md"
     source.parent.mkdir()
@@ -141,3 +146,25 @@ def test_file_completions_return_project_directories(tmp_path: Path) -> None:
     matches = find_file_completions(tmp_path, "reference", index)
 
     assert matches[0] == FileCompletion(directory, "reference-notes/", is_directory=True)
+
+
+def test_system_search_excludes_project_paths(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    project = tmp_path / "project"
+    project.mkdir()
+    inside = project / "bug-report.md"
+    outside = tmp_path / "Desktop" / "bug-report.png"
+    inside.touch()
+    outside.parent.mkdir()
+    outside.touch()
+    monkeypatch.setattr(
+        "ghostwriter.files.search_system_file_index",
+        lambda _query, **_kwargs: [str(outside), str(inside)],
+    )
+    monkeypatch.setattr("ghostwriter.files.shutil.which", lambda _name: None)
+
+    matches = find_system_file_completions(project, "bug-report")
+
+    assert matches == [FileCompletion(outside, outside.as_posix())]
