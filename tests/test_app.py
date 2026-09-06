@@ -12,9 +12,10 @@ from textual.widgets import Select
 from textual.widgets._select import InvalidSelectValueError
 
 from ghostwriter.app import CurrentThemeProvider, GhostwriterApp
-from ghostwriter.config import ConfigStore
+from ghostwriter.config import ConfigStore, GhostwriterConfig, PromptTemplateConfig
 from ghostwriter.model import Draft
 from ghostwriter.pi import PiSkill, PiTarget
+from ghostwriter.prompt_screens import PromptTemplateScreen
 from ghostwriter.storage import DraftStore
 
 
@@ -278,7 +279,225 @@ async def test_skill_completion_works_mid_prompt_and_styles_inserted_token(tmp_p
 
 
 @pytest.mark.asyncio
-async def test_at_completion_attaches_project_file_with_compact_marker(tmp_path: Path) -> None:
+async def test_prompt_template_completion_adds_reference_then_f3_expands_it(
+    tmp_path: Path,
+) -> None:
+    prompts = tmp_path / "prompts"
+    prompts.mkdir()
+    (prompts / "review.md").write_text(
+        "---\nname: review\ndescription: Review the selected area\n---\n"
+        "First pass.\n\nSecond pass.",
+        encoding="utf-8",
+    )
+    config_store = ConfigStore(tmp_path / "config.json")
+    config_store.save(
+        GhostwriterConfig(
+            prompt_templates=PromptTemplateConfig(directory=prompts)
+        )
+    )
+    app = GhostwriterApp(config_store=config_store)
+    app.draft = Draft(text="")
+    app.store = DraftStore(tmp_path / "draft.json")
+
+    async with app.run_test(size=(120, 40)) as pilot:
+        editor = app.query_one("#prompt-editor")
+        editor.load_text("Before /prompt:rev after")
+        editor.cursor_location = (0, len("Before /prompt:rev"))
+        app._update_completions()
+
+        options = app.query_one("#prompt-completions")
+        assert options.display
+        assert options.option_count == 1
+        assert options.options[0].prompt.plain == (
+            "/prompt:review\nReview the selected area"
+        )
+        assert app._handle_completion_key("tab")
+        await pilot.pause()
+
+        assert editor.text == "Before /prompt:review after"
+        rendered_line = editor.get_line(0)
+        assert any(
+            rendered_line.plain[span.start : span.end] == "/prompt:review"
+            for span in rendered_line.spans
+        )
+
+        await pilot.press("f3")
+        await pilot.pause()
+
+        assert editor.text == "Before First pass.\n\nSecond pass. after"
+
+
+@pytest.mark.asyncio
+async def test_prompt_picker_inserts_and_expands_without_changing_slash_completion(
+    tmp_path: Path,
+) -> None:
+    prompts = tmp_path / "prompts"
+    prompts.mkdir()
+    (prompts / "concise.md").write_text(
+        "---\nname: concise\ndescription:\n---\nKeep the answer short.",
+        encoding="utf-8",
+    )
+    (prompts / "review.md").write_text(
+        "---\nname: review\ndescription: Review carefully\n---\nReview the implementation.",
+        encoding="utf-8",
+    )
+    config_store = ConfigStore(tmp_path / "config.json")
+    config_store.save(
+        GhostwriterConfig(
+            prompt_templates=PromptTemplateConfig(directory=prompts)
+        )
+    )
+    app = GhostwriterApp(config_store=config_store)
+    app.draft = Draft(text="Existing draft")
+    app.store = DraftStore(tmp_path / "draft.json")
+    opened: list[Path] = []
+    app._open_prompt_template_directory = opened.append  # type: ignore[method-assign]
+
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+        editor = app.query_one("#prompt-editor")
+        editor.cursor_location = (0, len(editor.text))
+        await pilot.click("#prompts")
+        await pilot.pause()
+
+        screen = app.screen
+        assert isinstance(screen, PromptTemplateScreen)
+        options = screen.query_one("#prompt-template-list")
+        assert [option.prompt.plain for option in options.options] == [
+            "concise\n ",
+            "review\nReview carefully",
+        ]
+        name_span, description_span = options.options[1].prompt.spans
+        assert name_span.style.bold
+        assert not description_span.style.bold
+
+        await pilot.click("#prompt-template-open-folder")
+        await pilot.pause()
+        assert opened == [prompts]
+        assert app.screen is screen
+
+        actions = [
+            screen.query_one(f"#prompt-template-{name}")
+            for name in ("insert", "expand", "open-folder", "cancel")
+        ]
+        assert len({button.region.y for button in actions}) == 1
+        assert not screen.query("#prompt-template-replace")
+        assert not screen.query("#prompt-template-refresh")
+
+        options.highlighted = 1
+        await pilot.click("#prompt-template-insert")
+        await pilot.pause()
+        assert editor.text == "Existing draft /prompt:review "
+
+        await pilot.click("#prompts")
+        await pilot.pause()
+        await pilot.click("#prompt-template-expand")
+        await pilot.pause()
+        assert editor.text == "Existing draft Review the implementation. "
+
+        before_cancel = editor.text
+        await pilot.click("#prompts")
+        await pilot.pause()
+        await pilot.press("escape")
+        await pilot.pause()
+        assert editor.text == before_cancel
+
+
+@pytest.mark.asyncio
+async def test_prompt_picker_has_a_safe_empty_state(tmp_path: Path) -> None:
+    app = GhostwriterApp(config_store=ConfigStore(tmp_path / "config.json"))
+    app.draft = Draft(text="Unchanged")
+    app.store = DraftStore(tmp_path / "draft.json")
+
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+        await pilot.click("#prompts")
+        await pilot.pause()
+
+        screen = app.screen
+        assert isinstance(screen, PromptTemplateScreen)
+        assert not screen.query_one("#prompt-template-list").display
+        assert screen.query_one("#prompt-template-empty").display
+        assert screen.query_one("#prompt-template-insert").disabled
+        assert not screen.query("#prompt-template-replace")
+        assert not screen.query("#prompt-template-refresh")
+
+        await pilot.press("escape")
+        await pilot.pause()
+        assert app.query_one("#prompt-editor").text == "Unchanged"
+
+
+@pytest.mark.asyncio
+async def test_settings_refresh_updates_added_and_deleted_prompt_templates(
+    tmp_path: Path,
+) -> None:
+    prompts = tmp_path / "prompts"
+    prompts.mkdir()
+    old_template = prompts / "old.md"
+    old_template.write_text(
+        "---\nname: old\ndescription: Old\n---\nOld body",
+        encoding="utf-8",
+    )
+    config_store = ConfigStore(tmp_path / "config.json")
+    config_store.save(
+        GhostwriterConfig(
+            prompt_templates=PromptTemplateConfig(directory=prompts)
+        )
+    )
+    app = GhostwriterApp(config_store=config_store)
+    app.draft = Draft(text="")
+    app.store = DraftStore(tmp_path / "draft.json")
+
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+        old_template.unlink()
+        (prompts / "new.md").write_text(
+            "---\nname: new\ndescription: New\n---\nNew body",
+            encoding="utf-8",
+        )
+
+        commands = {command.title: command for command in app.get_system_commands(app.screen)}
+        commands["Refresh"].callback()
+        assert [template.name for template in app.prompt_templates] == ["new"]
+
+        await pilot.click("#prompts")
+        await pilot.pause()
+        screen = app.screen
+        assert isinstance(screen, PromptTemplateScreen)
+        options = screen.query_one("#prompt-template-list")
+        assert [option.id for option in options.options] == ["new"]
+
+
+@pytest.mark.asyncio
+async def test_prompt_refresh_discovers_templates_created_after_launch(
+    tmp_path: Path,
+) -> None:
+    prompts = tmp_path / "prompts"
+    prompts.mkdir()
+    config_store = ConfigStore(tmp_path / "config.json")
+    config_store.save(
+        GhostwriterConfig(
+            prompt_templates=PromptTemplateConfig(directory=prompts)
+        )
+    )
+    app = GhostwriterApp(config_store=config_store)
+    app.draft = Draft(text="")
+    app.store = DraftStore(tmp_path / "draft.json")
+
+    async with app.run_test(size=(120, 40)):
+        assert app.prompt_templates == []
+        (prompts / "new.md").write_text(
+            "---\nname: new\ndescription: New Prompt\n---\nNew prompt",
+            encoding="utf-8",
+        )
+
+        app.action_refresh_targets()
+
+        assert [template.name for template in app.prompt_templates] == ["new"]
+
+
+@pytest.mark.asyncio
+async def test_at_completion_attaches_project_file_with_relative_marker(tmp_path: Path) -> None:
     source = tmp_path / "src" / "context.md"
     source.parent.mkdir()
     source.write_text("context", encoding="utf-8")
@@ -297,9 +516,36 @@ async def test_at_completion_attaches_project_file_with_compact_marker(tmp_path:
         assert app._handle_completion_key("tab")
         await pilot.pause()
 
-        assert editor.text == "Review @context.md "
+        assert editor.text == "Review @src/context.md "
         assert app.draft.attachments[0].source == source.resolve()
         assert app.query_one("#attachments").row_count == 1
+
+
+@pytest.mark.asyncio
+async def test_same_filename_in_different_project_folders_stays_unambiguous(
+    tmp_path: Path,
+) -> None:
+    first = tmp_path / "one" / "context.md"
+    second = tmp_path / "two" / "context.md"
+    first.parent.mkdir()
+    second.parent.mkdir()
+    first.write_text("first", encoding="utf-8")
+    second.write_text("second", encoding="utf-8")
+    app = GhostwriterApp()
+    app.draft = Draft(text="")
+    app.store = DraftStore(tmp_path / "draft.json")
+
+    async with app.run_test(size=(120, 40)):
+        app._project_root = lambda: tmp_path
+        app._add_attachment(first)
+        app._add_attachment(second)
+
+        assert [attachment.display_path for attachment in app.draft.attachments] == [
+            "one/context.md",
+            "two/context.md",
+        ]
+        assert "@one/context.md" in app.query_one("#prompt-editor").text
+        assert "@two/context.md" in app.query_one("#prompt-editor").text
 
 
 @pytest.mark.asyncio

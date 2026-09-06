@@ -38,7 +38,7 @@ def test_version_one_draft_migrates_verbose_attachment_marker() -> None:
 
 def test_attachment_editor_paths_follow_root_and_display_mode(tmp_path: Path) -> None:
     project = tmp_path / "project"
-    inside = Attachment("file", str(project / "inside.md"))
+    inside = Attachment("file", str(project / "src" / "inside.md"))
     outside = Attachment("file", str(tmp_path / "outside.md"))
     attachments = [inside, outside]
 
@@ -50,13 +50,13 @@ def test_attachment_editor_paths_follow_root_and_display_mode(tmp_path: Path) ->
     )
 
     assert changed
-    assert text == f"Review @inside.md and @{tmp_path.as_posix()}/outside.md"
+    assert text == f"Review @src/inside.md and @{tmp_path.as_posix()}/outside.md"
 
     text, changed = refresh_attachment_editor_paths(text, attachments, project, "full")
 
     assert changed
     assert text == (
-        f"Review @{project.as_posix()}/inside.md and @{tmp_path.as_posix()}/outside.md"
+        f"Review @{project.as_posix()}/src/inside.md and @{tmp_path.as_posix()}/outside.md"
     )
 
 

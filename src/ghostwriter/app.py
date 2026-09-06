@@ -42,6 +42,7 @@ from .config import (
     RewriteConfig,
     UIConfig,
     open_config_file,
+    open_desktop_path,
 )
 from .files import (
     FileCompletion,
@@ -60,6 +61,13 @@ from .model import (
     refresh_attachment_editor_paths,
 )
 from .pi import PiBridgeClient, PiSkill, PiTarget
+from .prompt_screens import PromptTemplateScreen
+from .prompt_templates import (
+    PROMPT_REFERENCE_PATTERN,
+    PromptTemplate,
+    expand_prompt_references,
+    load_prompt_templates,
+)
 from .rewrite import (
     PiRpcError,
     PiRpcSession,
@@ -74,6 +82,7 @@ from .wrapping import NaturalWrappedDocument
 SKILL_TOKEN_PATTERN = re.compile(r"(?<!\S)/skill:[a-z0-9-]+(?=$|\s)")
 SKILL_COMPLETION_PATTERN = re.compile(r"(?<!\S)/skill(?::([^\s]*))?$")
 FILE_COMPLETION_PATTERN = re.compile(r"(?<!\S)@([^\s]*)$")
+PROMPT_COMPLETION_PATTERN = re.compile(r"(?<!\S)/prompt(?::([^\s]*))?$")
 MAX_SYSTEM_COMPLETION_CACHE = 128
 SYSTEM_COMPLETION_DEBOUNCE = 0.12
 SYSTEM_COMPLETION_WORKER_GROUP = "system-file-completion"
@@ -132,6 +141,7 @@ class PromptTextArea(TextArea):
     COMPONENT_CLASSES = TextArea.COMPONENT_CLASSES | {
         "prompt-attachment",
         "prompt-skill",
+        "prompt-template",
     }
 
     def __init__(self, *args: object, **kwargs: object) -> None:
@@ -168,6 +178,10 @@ class PromptTextArea(TextArea):
         skill_style = self.get_component_rich_style("prompt-skill")
         for match in SKILL_TOKEN_PATTERN.finditer(line.plain):
             line.stylize(skill_style, match.start(), match.end())
+
+        template_style = self.get_component_rich_style("prompt-template")
+        for match in PROMPT_REFERENCE_PATTERN.finditer(line.plain):
+            line.stylize(template_style, match.start(), match.end())
         return line
 
     def _on_paste(self, event: events.Paste) -> None:
@@ -207,6 +221,7 @@ class GhostwriterApp(App[None]):
         Binding("ctrl+o", "choose_file", "Attach files"),
         Binding("ctrl+r", "refresh_targets", "Refresh targets and files"),
         Binding("ctrl+s", "save", "Save draft"),
+        Binding("f3", "expand_prompts", "Expand Prompt references"),
         Binding("f4", "rewrite", "Translate / tidy"),
         Binding("ctrl+q", "quit", "Quit"),
     ]
@@ -242,8 +257,13 @@ class GhostwriterApp(App[None]):
             prompt=rewrite_config.prompt,
         )
         self.rewrite_rpc = PiRpcSession()
-        self._completion_candidates: list[FileCompletion | PiSkill] = []
-        self._completion_kind: Literal["file", "skill"] | None = None
+        self.prompt_templates = load_prompt_templates(
+            self.config.prompt_templates.directory
+        )
+        self._completion_candidates: list[
+            FileCompletion | PiSkill | PromptTemplate
+        ] = []
+        self._completion_kind: Literal["file", "skill", "template"] | None = None
         self._file_index_root: Path | None = None
         self._file_index: list[str] = []
         self._system_completion_cache: dict[tuple[Path, str], list[FileCompletion]] = {}
@@ -262,7 +282,7 @@ class GhostwriterApp(App[None]):
         )
         yield SystemCommand(
             "Refresh",
-            "Reload configuration and refresh targets, Skills, and file search",
+            "Reload configuration and refresh targets, Prompts, Skills, and file search",
             self._reload_config_command,
         )
         yield from (
@@ -296,7 +316,7 @@ class GhostwriterApp(App[None]):
                         id="prompt-editor",
                         soft_wrap=True,
                         show_line_numbers=False,
-                        placeholder="Compose here, type @ to attach a file or folder, or /skill: to add a skill…",
+                        placeholder="Compose here; type @ for files, /prompt: for Prompts, or /skill: for Skills…",
                     )
                     yield OptionList(id="prompt-completions", markup=False, compact=True)
                 yield DragHandle(id="height-handle")
@@ -308,6 +328,14 @@ class GhostwriterApp(App[None]):
                         compact=True,
                         flat=True,
                         tooltip="Choose one or more files (Ctrl+O)",
+                    )
+                    yield Button(
+                        "Prompts",
+                        id="prompts",
+                        classes="tool-button",
+                        compact=True,
+                        flat=True,
+                        tooltip="Browse Prompt templates; press F3 to expand references",
                     )
                     yield Button(
                         "Inject",
@@ -433,6 +461,12 @@ class GhostwriterApp(App[None]):
     def _open_config(self) -> None:
         open_config_file(self.config_store.path)
 
+    @staticmethod
+    def _open_prompt_template_directory(directory: Path) -> None:
+        directory = directory.expanduser()
+        directory.mkdir(parents=True, exist_ok=True, mode=0o700)
+        open_desktop_path(directory)
+
     def _open_config_command(self) -> None:
         try:
             self._open_config()
@@ -441,15 +475,18 @@ class GhostwriterApp(App[None]):
         else:
             self.notify("Config opened. Save it, then choose Refresh.")
 
+    def _refresh_application(self) -> None:
+        self._reload_config()
+        self.action_refresh_targets()
+        self._set_status("Application refreshed")
+
     def _reload_config_command(self) -> None:
         try:
-            self._reload_config()
+            self._refresh_application()
         except (OSError, TypeError, ValueError) as error:
             self.notify(f"Could not refresh: {error}", severity="error")
         else:
-            self.action_refresh_targets()
-            self._set_status("Application refreshed")
-            self.notify("Config, Pi targets, Skills, and file search refreshed")
+            self.notify("Config, Pi targets, Prompts, Skills, and file search refreshed")
 
     def _reload_config(self) -> RewriteConfig:
         previous_rewrite = self.config.rewrite
@@ -481,6 +518,9 @@ class GhostwriterApp(App[None]):
         if config.file_search != previous_file_search:
             self._file_index_root = None
             self._system_completion_cache.clear()
+        self.prompt_templates = load_prompt_templates(
+            config.prompt_templates.directory
+        )
         if self.theme != config.ui.theme:
             self.theme = config.ui.theme
         self._refresh_attachment_markers()
@@ -515,7 +555,7 @@ class GhostwriterApp(App[None]):
         table = self.query_one("#attachments", DataTable)
         table.clear()
         for attachment in self.draft.attachments:
-            table.add_row(attachment.display_name, key=attachment.id)
+            table.add_row(attachment.display_path, key=attachment.id)
 
     def _refresh_attachment_markers(self) -> None:
         editor = self._prompt_editor
@@ -566,7 +606,7 @@ class GhostwriterApp(App[None]):
         self._refresh_attachment_table()
         self._capture_text()
         self.store.save(self.draft)
-        self._set_status(f"Attached {attachment.display_name}")
+        self._set_status(f"Attached {attachment.display_path}")
 
     def _add_paths(self, paths: list[Path]) -> None:
         failures: list[str] = []
@@ -633,10 +673,26 @@ class GhostwriterApp(App[None]):
             return None
         return (match.group(1) or ""), (row, match.start()), (row, column)
 
+    def _template_completion_context(
+        self,
+    ) -> tuple[str, tuple[int, int], tuple[int, int]] | None:
+        editor = self.query_one("#prompt-editor", TextArea)
+        row, column = editor.cursor_location
+        if row >= editor.document.line_count:
+            return None
+        before_cursor = editor.document.get_line(row)[:column]
+        match = PROMPT_COMPLETION_PATTERN.search(before_cursor)
+        if match is None:
+            return None
+        return (match.group(1) or ""), (row, match.start()), (row, column)
+
     def _update_completions(self) -> None:
         if self._skill_completion_context() is not None:
             self._cancel_system_completion_search()
             self._update_skill_completions()
+        elif self._template_completion_context() is not None:
+            self._cancel_system_completion_search()
+            self._update_template_completions()
         else:
             self._update_file_completions()
 
@@ -823,6 +879,47 @@ class GhostwriterApp(App[None]):
         options.highlighted = 0
         options.display = True
 
+    def _update_template_completions(self) -> None:
+        context = self._template_completion_context()
+        if context is None:
+            self._hide_completions()
+            return
+        query, _, _ = context
+        lowered = query.casefold()
+        candidates = [
+            template
+            for template in self.prompt_templates
+            if template.name.casefold().startswith(lowered)
+        ]
+        if not candidates:
+            candidates = [
+                template
+                for template in self.prompt_templates
+                if lowered in template.name.casefold()
+            ]
+        if not candidates:
+            self._hide_completions()
+            return
+
+        visible_candidates = candidates[:12]
+        self._completion_candidates = list(visible_candidates)
+        self._completion_kind = "template"
+        options = self.query_one("#prompt-completions", OptionList)
+        options.clear_options()
+        template_options: list[Option] = []
+        for index, template in enumerate(visible_candidates):
+            prompt = Text(no_wrap=True, overflow="ellipsis")
+            prompt.append(template.reference, style=Style(bold=True))
+            description = " ".join(template.description.split())
+            if description:
+                prompt.append("\n")
+                prompt.append(description, style=Style(dim=True))
+            template_options.append(Option(prompt, id=str(index)))
+        options.add_options(template_options)
+        options.styles.height = 8
+        options.highlighted = 0
+        options.display = True
+
     def _hide_completions(self) -> None:
         self._completion_candidates = []
         self._completion_kind = None
@@ -851,6 +948,8 @@ class GhostwriterApp(App[None]):
             self._accept_file_completion(index)
         elif self._completion_kind == "skill":
             self._accept_skill_completion(index)
+        elif self._completion_kind == "template":
+            self._accept_template_completion(index)
 
     def _accept_file_completion(self, index: int) -> None:
         if index < 0 or index >= len(self._completion_candidates):
@@ -893,6 +992,87 @@ class GhostwriterApp(App[None]):
         editor.move_cursor(result.end_location)
         self._hide_completions()
         editor.focus()
+
+    def _accept_template_completion(self, index: int) -> None:
+        if index < 0 or index >= len(self._completion_candidates):
+            return
+        candidate = self._completion_candidates[index]
+        context = self._template_completion_context()
+        if context is None or not isinstance(candidate, PromptTemplate):
+            self._hide_completions()
+            return
+        _, start, end = context
+        editor = self.query_one("#prompt-editor", TextArea)
+        row, column = end
+        line = editor.document.get_line(row)
+        suffix = "" if column < len(line) and line[column].isspace() else " "
+        result = editor.replace(
+            f"{candidate.reference}{suffix}",
+            start,
+            end,
+            maintain_selection_offset=False,
+        )
+        editor.move_cursor(result.end_location)
+        self._hide_completions()
+        editor.focus()
+        self._set_status(f"Added Prompt reference {candidate.reference}")
+
+    def _insert_prompt_template(self, template: PromptTemplate) -> None:
+        editor = self.query_one("#prompt-editor", TextArea)
+        if editor.selection.is_empty:
+            row, column = editor.cursor_location
+            line = editor.document.get_line(row)
+            prefix = "" if column == 0 or line[column - 1].isspace() else " "
+            suffix = "" if column < len(line) and line[column].isspace() else " "
+            result = editor.insert(f"{prefix}{template.reference}{suffix}")
+        else:
+            result = editor.replace(
+                template.reference,
+                *editor.selection,
+                maintain_selection_offset=False,
+            )
+        editor.move_cursor(result.end_location)
+        editor.focus()
+        self._set_status(f"Added Prompt reference {template.reference}")
+
+    async def _choose_prompt_template(self) -> None:
+        decision = await self.push_screen_wait(
+            PromptTemplateScreen(
+                self.prompt_templates,
+                self.config.prompt_templates.directory,
+                open_folder=self._open_prompt_template_directory,
+            )
+        )
+        if decision is None:
+            return
+        if decision.action == "expand":
+            self._process_prompt_templates()
+        elif decision.template is not None:
+            self._insert_prompt_template(decision.template)
+
+    def _process_prompt_templates(self) -> None:
+        editor = self.query_one("#prompt-editor", TextArea)
+        expanded, missing = expand_prompt_references(
+            editor.text,
+            self.prompt_templates,
+        )
+        if missing:
+            self.notify(
+                f"Missing Prompt template: {', '.join(missing)}",
+                severity="error",
+            )
+            return
+        if expanded == editor.text:
+            self.notify(
+                "Add a Prompt template with /prompt: before expanding",
+                severity="warning",
+            )
+            return
+        editor.load_text(expanded)
+        editor.focus()
+        self._capture_text()
+        self.store.save(self.draft)
+        self._set_status("Prompt references expanded")
 
     def _apply_split(self) -> None:
         workspace = self.query_one("#workspace", Horizontal)
@@ -969,6 +1149,16 @@ class GhostwriterApp(App[None]):
     def action_inject(self) -> None:
         self.run_worker(self._inject(), exclusive=True, group="inject")
 
+    def action_prompts(self) -> None:
+        self.run_worker(
+            self._choose_prompt_template(),
+            exclusive=True,
+            group="prompt-templates",
+        )
+
+    def action_expand_prompts(self) -> None:
+        self._process_prompt_templates()
+
     def action_rewrite(self) -> None:
         self.run_worker(self._rewrite(), exclusive=True, group="rewrite")
 
@@ -1037,6 +1227,9 @@ class GhostwriterApp(App[None]):
 
     def action_refresh_targets(self) -> None:
         self._cancel_system_completion_search()
+        self.prompt_templates = load_prompt_templates(
+            self.config.prompt_templates.directory
+        )
         self._file_index_root = None
         self._system_completion_cache.clear()
         target_select = self.query_one("#target", Select)
@@ -1131,6 +1324,8 @@ class GhostwriterApp(App[None]):
                 self.action_command_palette()
             case "add-attachment":
                 self._open_file_picker()
+            case "prompts":
+                self.action_prompts()
             case "inject":
                 self.action_inject()
             case "rewrite":
@@ -1158,7 +1353,7 @@ class GhostwriterApp(App[None]):
             return
 
         path.display = True
-        path.update(str(attachment.source))
+        path.update(attachment.display_path)
         if attachment.source.is_dir():
             message.display = True
             message.update("Directory preview unavailable")

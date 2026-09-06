@@ -101,6 +101,11 @@ PromptTextArea .prompt-skill {
     text-style: bold;
 }
 
+PromptTextArea .prompt-template {
+    color: $warning;
+    text-style: bold;
+}
+
 #prompt-completions {
     height: 8;
     margin-top: 1;
@@ -212,12 +217,14 @@ Footer {
     background: #171b21;
 }
 
+PromptTemplateScreen,
 RewriteConfigScreen,
 RewriteReviewScreen {
     align: center middle;
     background: #05070aaa;
 }
 
+#prompt-template-dialog,
 #rewrite-config-dialog,
 #rewrite-review-dialog {
     width: 88;
@@ -225,6 +232,31 @@ RewriteReviewScreen {
     background: #14181e;
     border: round #8d97a6;
     padding: 1 2;
+}
+
+#prompt-template-dialog {
+    width: 76;
+    max-width: 94%;
+    height: 82%;
+}
+
+#prompt-template-list {
+    height: 1fr;
+    min-height: 6;
+    border: round #343b46;
+    background: #101318;
+}
+
+#prompt-template-empty {
+    height: 1fr;
+    min-height: 6;
+    content-align: center middle;
+    border: round #343b46;
+    color: #9199a6;
+}
+
+#prompt-template-dialog .prompt-template-actions {
+    margin: 1 0 0 0;
 }
 
 #rewrite-config-dialog {

@@ -27,8 +27,12 @@ class Attachment:
         return f"{self.source.name}{suffix}"
 
     @property
+    def display_path(self) -> str:
+        return self.editor_path or self.display_name
+
+    @property
     def editor_token(self) -> str:
-        return f"@{self.editor_path or self.display_name}"
+        return f"@{self.display_path}"
 
     @property
     def legacy_editor_token(self) -> str:
@@ -62,7 +66,7 @@ def format_attachment_editor_path(
     path_display: PathDisplay,
 ) -> str:
     if path_display == "auto" and source.is_relative_to(root):
-        value = source.name or source.as_posix()
+        value = source.relative_to(root).as_posix()
     else:
         value = source.as_posix()
     return value + ("/" if is_directory and not value.endswith("/") else "")

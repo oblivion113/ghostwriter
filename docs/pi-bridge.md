@@ -176,6 +176,12 @@ forceEditorRender?.();
 
 This render workaround is intentionally isolated in the extension. If a future Pi release makes `setEditorText` schedule a full repaint itself, remove the hook only after an interactive regression test.
 
+## Prompt template boundary
+
+Ghostwriter's `/prompt:<name>` references are expanded locally before injection and do not cross the bridge. The body is inserted literally; Pi-style arguments are not evaluated.
+
+Pi's extension lifecycle does not provide a safe native-expansion service for this use case. The `input` event can stop dispatch but runs before Skill and Prompt-template expansion. `before_agent_start` receives expanded text but cannot mark the request as handled, so reaching it has already entered the Agent submission path. Pi's expansion helper is also a private, unexported module. Ghostwriter therefore does not invoke or copy that implementation; doing so would either dispatch accidentally or create a brittle dependency on Pi internals.
+
 ## Skill invocation text
 
 Ghostwriter inserts `/skill:<name>` directly into the draft and sends it unchanged. Skills do not have attachment-style metadata, checkboxes, or previews. When an invocation begins Pi's submitted input and skill commands are enabled, Pi performs its normal command expansion. An invocation embedded later in prose remains literal text, which still gives the Agent an explicit skill name to match against its available-skill instructions.

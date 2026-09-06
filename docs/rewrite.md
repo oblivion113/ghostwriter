@@ -4,10 +4,10 @@ Ghostwriter can use an isolated Pi RPC process to translate, tidy, or translate 
 
 ## Attachment integrity
 
-Attachments inserted through Ghostwriter appear in the editor as compact display markers such as:
+Attachments inserted through Ghostwriter appear in the editor as working-directory-relative display markers such as:
 
 ```text
-@diagram.png
+@docs/diagram.png
 ```
 
 Before model processing, each occurrence is replaced with a random opaque token:
@@ -47,7 +47,7 @@ On first start, Ghostwriter writes `config.json` under `user_config_path("ghostw
 The Rewrite dialog provides two configuration controls:
 
 1. **Open config** launches the JSON file through the operating system's default associated editor.
-2. **Refresh** validates the saved file, repopulates both dropdowns, and refreshes targets, Skills, and file search without restarting Ghostwriter.
+2. **Refresh** validates the saved file, repopulates both dropdowns, and refreshes targets, Prompt templates, Skills, and file search without restarting Ghostwriter.
 
 The file is also reloaded immediately before each Rewrite dialog opens. A failed manual reload leaves the edited file untouched and keeps the last valid in-memory settings, so the user can correct it. A malformed file found during app startup is instead moved aside as `config.broken-<pid>.json` and replaced with safe defaults.
 

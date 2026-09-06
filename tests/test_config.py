@@ -21,10 +21,13 @@ def test_config_store_creates_editable_defaults(tmp_path: Path) -> None:
 
     assert path.is_file()
     assert config.ui.theme == "textual-dark"
+    assert config.prompt_templates.directory == tmp_path / "prompts"
+    assert config.prompt_templates.directory.is_dir()
     assert config.file_search.include_hidden is False
     assert config.file_search.use_global_fzf_options
     assert config.file_search.path_display == "auto"
     assert "node_modules" in config.file_search.skipped_directories
+    assert "promptTemplates" in path.read_text(encoding="utf-8")
     assert "fileSearch" in path.read_text(encoding="utf-8")
     assert not config.rewrite.keep_rpc_warm
     assert config.rewrite.default_agent.provider == "agent-plan"
@@ -34,6 +37,20 @@ def test_config_store_creates_editable_defaults(tmp_path: Path) -> None:
     assert "{text}" in config.rewrite.prompt
 
 
+def test_existing_config_is_updated_with_prompt_template_directory(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "config.json"
+    path.write_text('{"version": 1}', encoding="utf-8")
+
+    ConfigStore(path).load()
+
+    saved = json.loads(path.read_text(encoding="utf-8"))
+    prompt_directory = Path(saved["promptTemplates"]["directory"])
+    assert prompt_directory == tmp_path / "prompts"
+    assert prompt_directory.is_dir()
+
+
 def test_config_loads_agents_languages_and_custom_prompt(tmp_path: Path) -> None:
     path = tmp_path / "config.json"
     path.write_text(
@@ -41,6 +58,7 @@ def test_config_loads_agents_languages_and_custom_prompt(tmp_path: Path) -> None
             {
                 "version": 1,
                 "ui": {"theme": "nord"},
+                "promptTemplates": {"directory": "~/.pi/agent/prompts"},
                 "fileSearch": {
                     "includeHidden": True,
                     "useGlobalFzfOptions": False,
@@ -70,6 +88,7 @@ def test_config_loads_agents_languages_and_custom_prompt(tmp_path: Path) -> None
     config = ConfigStore(path).load()
 
     assert config.ui.theme == "nord"
+    assert config.prompt_templates.directory == Path.home() / ".pi/agent/prompts"
     assert config.file_search.include_hidden
     assert not config.file_search.use_global_fzf_options
     assert config.file_search.path_display == "full"
@@ -100,6 +119,13 @@ def test_legacy_named_default_agent_is_migrated_to_first_provider_model() -> Non
     serialized = config.to_dict()["rewrite"]
     assert "defaultAgent" not in serialized
     assert all("name" not in agent for agent in serialized["agents"])
+
+
+def test_config_rejects_invalid_prompt_template_directory() -> None:
+    with pytest.raises(TypeError, match="promptTemplates.directory"):
+        GhostwriterConfig.from_dict(
+            {"version": 1, "promptTemplates": {"directory": ""}}
+        )
 
 
 def test_config_rejects_unknown_theme() -> None:

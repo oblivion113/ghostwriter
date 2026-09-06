@@ -24,6 +24,8 @@ The Python application owns composition and local state. The TypeScript extensio
 | `src/ghostwriter/model.py` | Versioned `Draft` and `Attachment` serialization |
 | `src/ghostwriter/config.py` | Unified JSON UI, file-search, and rewrite settings with validation |
 | `src/ghostwriter/files.py` | Path parsing, project indexing and ranking, native picker, and safe previews |
+| `src/ghostwriter/prompt_templates.py` | Simple Prompt discovery, frontmatter parsing, `/prompt:<name>` references, and literal expansion |
+| `src/ghostwriter/prompt_screens.py` | Prompt picker, folder access, and explicit insert/expand decisions |
 | `src/ghostwriter/system_search.py` | Bounded, cancellable access to Spotlight or `locate` |
 | `src/ghostwriter/wrapping.py` | Incremental CJK-aware soft wrapping that preserves source text |
 | `src/ghostwriter/storage.py` | Atomic draft persistence and legacy image-cache cleanup |
@@ -37,8 +39,8 @@ The project is intentionally Pi-specific. `PiBridgeClient` is a concrete boundar
 ## Main injection flow
 
 1. `GhostwriterApp` loads a versioned draft from `DraftStore`.
-2. Files enter through drag-and-drop, the native picker, startup arguments, or `@` completion; folders enter through pasted paths, startup arguments, or `@` completion. Skill invocations enter as ordinary `/skill:<name>` text through target-aware completion.
-3. The editor displays styled attachment markers. Auto path display uses a basename inside the selected working directory and an absolute path outside it; `Attachment` retains that editor path and the original source, while skill invocations deliberately create no separate draft state.
+2. Files enter through drag-and-drop, the native picker, startup arguments, or `@` completion; folders enter through pasted paths, startup arguments, or `@` completion. Inline Prompt completion and the Prompt picker insert styled `/prompt:<name>` references, while Skill invocations enter as ordinary `/skill:<name>` text through target-aware completion.
+3. The Prompt picker's **Expand** action, or the global `F3` binding, replaces every valid Prompt reference in place. The editor displays styled attachment markers using a working-directory-relative path inside the selected project and an absolute path outside it; `Attachment` retains that editor path and the original source, while Prompt expansions and Skill invocations create no separate draft state.
 4. The selected `PiTarget` supplies the target working directory, socket, and Pi's loaded skill metadata.
 5. `serialize_draft()` replaces every display marker with the same Pi file-reference syntax: `@relative/path`, `@"path with spaces"`, or an absolute reference when the source is outside Pi's working directory.
 6. `PiBridgeClient.inject()` sends one bounded newline-delimited JSON request.
@@ -50,7 +52,7 @@ The project is intentionally Pi-specific. `PiBridgeClient` is a concrete boundar
 
 `Attachment` separates three representations:
 
-- **Display:** a configured editor path, defaulting to `@filename` inside Pi's working directory and an absolute `@/path` outside it
+- **Display:** a configured editor path, defaulting to `@relative/path` inside Pi's working directory and an absolute `@/path` outside it
 - **Local metadata:** original source path, editor path, preview kind, and ID in the persisted draft
 - **Pi representation:** a relative or absolute reference to that original source
 
@@ -66,13 +68,17 @@ After three filename characters and a 120 ms debounce, a thread worker queries t
 
 `fzf --filter` performs path-aware fuzzy ranking for both candidate sources, with a bounded-memory Python fallback for the project when unavailable. Global fzf options are inherited unless disabled in `fileSearch`. Queries beginning with `/` or a valid `~` expression use direct filesystem completion; incomplete expressions remain ordinary editable queries instead of raising from `Path.expanduser()`. `Ctrl+R` and **Refresh** both invalidate these indexes and rediscover Pi target and Skill metadata.
 
-The Pi extension obtains loaded skills from `pi.getCommands()` and publishes only each name and description in the target registry. Ghostwriter filters that small in-memory list when `/skill` or `/skill:<partial-name>` appears immediately before the cursor after whitespace, including in the middle of a larger prompt. Descriptions are normalized for a one-line secondary label; no skill document is opened. Tab accepts the highlighted file or skill candidate.
+Prompt templates are loaded non-recursively from `promptTemplates.directory` at startup and through **Settings → Refresh**. Each `.md` file requires a simple, single-line `name`; `description` is optional and may be empty, and the remaining body is retained literally. A `/prompt:<partial-name>` invocation immediately before the cursor filters the same in-memory list used by the picker and inserts a `/prompt:<name>` reference. Expansion validates every reference before making any replacement, so a missing template cannot cause a partial result. Multiple references are supported and internal body line breaks are preserved.
+
+Pi's native parameter expansion is not reused. The extension `input` event occurs before template expansion, while the first event carrying expanded text, `before_agent_start`, cannot mark the input as handled. Calling Pi's expansion pipeline would therefore begin an Agent turn. Depending on Pi's private, unexported expansion module would create a version-fragile compatibility boundary, so parameter expressions remain literal.
+
+The Pi extension obtains loaded skills from `pi.getCommands()` and publishes only each name and description in the target registry. Ghostwriter filters that small in-memory list when `/skill` or `/skill:<partial-name>` appears immediately before the cursor after whitespace, including in the middle of a larger prompt. Descriptions are normalized for a one-line secondary label; no skill document is opened. Tab accepts the highlighted file, Prompt reference, or Skill candidate.
 
 ## Rewrite flow
 
 Rewrite is separate from visible Pi injection:
 
-1. `ConfigStore` supplies file-search policy, ordered provider/model agents, target languages, extra instructions, warm-up policy, and the prompt template.
+1. `ConfigStore` supplies the Prompt-template directory, file-search policy, ordered provider/model agents, target languages, extra instructions, warm-up policy, and the rewrite prompt.
 2. `RewriteConfigScreen` returns validated `RewriteOptions` from configured dropdowns.
 3. `PiRpcSession.prepare()` launches an isolated process on demand and selects its configured model. Warm mode instead prewarms one process and starts a fresh Pi session for every workflow after the first.
 4. `AttachmentProtector` replaces every local marker occurrence with a random opaque token.
@@ -86,7 +92,8 @@ No attachment path, filename, or content is sent to the rewrite model.
 
 Textual owns terminal rendering and input. Important custom behavior includes:
 
-- `PromptTextArea`: intercepts bracketed paste and Tab completion without re-running Textual's default handlers, soft-wraps prose, keeps it white across themes, and styles attachment and `/skill:<name>` markers without changing their text;
+- `PromptTextArea`: intercepts bracketed paste and Tab completion without re-running Textual's default handlers, soft-wraps prose, keeps it white across themes, and styles attachment, Prompt, and `/skill:<name>` markers without changing their text;
+- `PromptTemplateScreen`: presents compact two-line entries and keeps draft changes behind explicit insert, expand, or cancel actions;
 - `DragHandle`: captures mouse events directly for independent width and height resizing;
 - `Select`: shows only the current Pi target until its dropdown is opened and uses a disabled sentinel only when no target exists;
 - `VerticalScroll`: keeps the side pane reachable in constrained layouts;
@@ -102,6 +109,7 @@ The app switches between side-by-side and stacked layouts using terminal width a
 Paths use `platformdirs`, so exact locations vary by operating system:
 
 - config: `user_config_path("ghostwriter")/config.json`
+- Prompt templates: `user_config_path("ghostwriter")/prompts/*.md` by default, or the configured directory
 - state: `user_state_path("ghostwriter")/draft.json`
 - rewrite sessions: `user_cache_path("ghostwriter")/rewrite-sessions/`
 - legacy attachment cache: `user_cache_path("ghostwriter")/images/` (removed in a background startup task and never recreated)

@@ -6,13 +6,14 @@ Ghostwriter creates `config.json` on first start using the platform's normal use
 ~/Library/Application Support/ghostwriter/config.json
 ```
 
-The simplest way to find and edit it is **Settings → Open config**. Save the file, return to Ghostwriter, and choose **Refresh**. This also refreshes Pi targets, Skills, and file-search indexes, so files created after launch become immediately searchable. Opening the Rewrite dialog reloads configuration only.
+The simplest way to find and edit it is **Settings → Open config**. Save the file, return to Ghostwriter, and choose **Refresh**. This also refreshes Pi targets, Prompt templates, Skills, and file-search indexes, so files and templates created after launch become immediately searchable. Opening the Rewrite dialog reloads configuration only.
 
 ## Structure
 
-The configuration has three sections:
+The configuration has four sections:
 
 - `ui` controls persistent interface preferences.
+- `promptTemplates` selects the directory containing reusable Prompts.
 - `fileSearch` controls `@` file and folder discovery and ranking.
 - `rewrite` controls Translate / Tidy models, languages, instructions, and process lifetime.
 
@@ -23,6 +24,9 @@ This focused example is valid; omitted fields use their defaults:
   "version": 1,
   "ui": {
     "theme": "nord"
+  },
+  "promptTemplates": {
+    "directory": "~/Library/Application Support/ghostwriter/prompts"
   },
   "fileSearch": {
     "includeHidden": false,
@@ -50,13 +54,35 @@ The generated file also contains the full default `skipDirectories` list and rew
 
 `ui.theme` sets the active theme and is updated automatically whenever a new theme is chosen from Ghostwriter's Theme palette. Available values are `textual-dark`, `nord`, `gruvbox`, `catppuccin-mocha`, `tokyo-night`, and `rose-pine-moon`.
 
+## Prompt templates
+
+`promptTemplates.directory` points to one folder containing `.md` Prompt templates. Ghostwriter's generated default is a `prompts` folder beside `config.json`, separate from Pi's `~/.pi/agent/prompts`. Paths may use `~`; the field may point to Pi's directory, although Ghostwriter intentionally supports only the simpler format below. Discovery is non-recursive.
+
+```markdown
+---
+name: review
+description: Review staged git changes
+---
+Review the staged changes carefully.
+
+Focus on correctness and security.
+```
+
+`name` is required and accepts letters, numbers, periods, underscores, and hyphens. `description` is optional and may be blank; when present, it is a single-line value. The body is literal text and may contain Markdown and line breaks.
+
+Choose **Prompts** to browse the folder. **Insert** adds the selected template as a `/prompt:<name>` reference, such as `/prompt:review`, at the cursor, while **Expand** expands all references already in the draft. `F3` performs the same expansion without opening the picker. **Open folder** opens the configured directory; use **Settings → Refresh** after templates are added or removed.
+
+Inline completion follows the same grammar as Skills: type `/prompt:rev`, then press Tab or click the result to insert `/prompt:review`. If a referenced template was removed or renamed, expansion stops without partially changing the draft.
+
+Pi argument expressions such as `$1`, `$@`, and `${@:2}` are not evaluated; they remain literal body text. Pi expands templates only inside its prompt-submission pipeline, and its extension API has no supported post-expansion interception point that can return the result without dispatching an Agent turn. Ghostwriter therefore avoids maintaining a second, potentially divergent implementation.
+
 ## File search
 
 | Field | Meaning |
 | --- | --- |
 | `includeHidden` | Include hidden files and folders during `@` search. Defaults to `false`. |
 | `useGlobalFzfOptions` | Inherit `FZF_DEFAULT_OPTS` and `FZF_DEFAULT_OPTS_FILE`. Set it to `false` for app-only behavior. |
-| `pathDisplay` | `auto` shows a filename for paths inside Pi's working directory and an absolute path for paths outside it. `full` always shows an absolute path. |
+| `pathDisplay` | `auto` shows paths relative to Pi's working directory for items inside it and absolute paths for items outside it. `full` always shows an absolute path. |
 | `skipDirectories` | Directory names omitted by project and system-index search, such as `.git`, `node_modules`, caches, and build outputs. Entries must be unique names, not paths. |
 | `ignoreFiles` | Additional gitignore-format files passed to `fd`. Paths may use `~`. |
 | `fzfOptions` | Extra command-line arguments used for non-interactive `fzf --filter` ranking. |
@@ -113,6 +139,6 @@ Ghostwriter validates placeholder integrity locally, but clear model instruction
 
 ## Reloading and recovery
 
-A failed manual reload leaves the edited file untouched and keeps the last valid in-memory configuration. Ghostwriter reports the error so you can correct the same file. A successful **Refresh** also rebuilds runtime discovery state: Pi targets, Skills, the project file index, and cached whole-computer results.
+A failed manual reload leaves the edited file untouched and keeps the last valid in-memory configuration. Ghostwriter reports the error so you can correct the same file. A successful **Refresh** also reloads Prompt templates and rebuilds runtime discovery state: Pi targets, Skills, the project file index, and cached whole-computer results.
 
 If the configuration is malformed during application startup, Ghostwriter moves it to `config.broken-<pid>.json` and creates a safe default replacement. JSON comments are not supported, so avoid `//` and `#` annotations.

@@ -4,7 +4,9 @@ All notable changes to Ghostwriter will be documented here. The project follows 
 
 ## Unreleased
 
-- Prevented the horizontal split from pushing the side pane beyond the viewport, removed the redundant app-name header, and renamed **Reload config** to **Refresh**; the broader command also refreshes targets, Skills, and file indexes.
+- Changed in-project attachment markers from ambiguous basenames to paths relative to the selected Pi working directory.
+- Added simple Prompt templates from a configurable, separately defaulted directory, with optional descriptions, a compact insert/expand picker, Settings-based folder refresh, `/prompt:<name>` completion aligned with Skills, direct `F3` expansion, and preserved line breaks.
+- Prevented the horizontal split from pushing the side pane beyond the viewport, removed the redundant app-name header, and renamed **Reload config** to **Refresh**; the broader command also refreshes targets, Prompt templates, Skills, and file indexes.
 - Expanded `@` completion to the operating system's file index, with selected-project matches first plus debounced, bounded, and cancellable background searches.
 - Added configurable attachment path display: compact names inside Pi's working directory and absolute paths outside by default, or full paths everywhere.
 - Fixed crashes from incomplete `~` path expressions and restored additional `@` completions on the same prompt line.

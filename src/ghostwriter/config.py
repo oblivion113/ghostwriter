@@ -17,6 +17,7 @@ from .model import PathDisplay
 
 CONFIG_VERSION = 1
 DEFAULT_THEME = "textual-dark"
+DEFAULT_PROMPT_TEMPLATE_DIRECTORY = user_config_path("ghostwriter") / "prompts"
 UI_THEMES = (
     "textual-dark",
     "nord",
@@ -223,6 +224,23 @@ class FileSearchConfig:
 
 
 @dataclass(frozen=True, slots=True)
+class PromptTemplateConfig:
+    directory: Path = DEFAULT_PROMPT_TEMPLATE_DIRECTORY
+
+    @classmethod
+    def from_dict(cls, data: object) -> PromptTemplateConfig:
+        if not isinstance(data, dict):
+            raise TypeError("promptTemplates must be an object")
+        directory = data.get("directory", str(DEFAULT_PROMPT_TEMPLATE_DIRECTORY))
+        if not isinstance(directory, str) or not directory.strip() or "\0" in directory:
+            raise TypeError("promptTemplates.directory must be a non-empty path")
+        return cls(directory=Path(directory.strip()).expanduser())
+
+    def to_dict(self) -> dict[str, str]:
+        return {"directory": str(self.directory)}
+
+
+@dataclass(frozen=True, slots=True)
 class UIConfig:
     theme: str = DEFAULT_THEME
 
@@ -243,6 +261,7 @@ class UIConfig:
 class GhostwriterConfig:
     version: int = CONFIG_VERSION
     ui: UIConfig = field(default_factory=UIConfig)
+    prompt_templates: PromptTemplateConfig = field(default_factory=PromptTemplateConfig)
     file_search: FileSearchConfig = field(default_factory=FileSearchConfig)
     rewrite: RewriteConfig = field(default_factory=RewriteConfig)
 
@@ -256,6 +275,9 @@ class GhostwriterConfig:
         return cls(
             version=CONFIG_VERSION,
             ui=UIConfig.from_dict(data.get("ui", {})),
+            prompt_templates=PromptTemplateConfig.from_dict(
+                data.get("promptTemplates", {})
+            ),
             file_search=FileSearchConfig.from_dict(data.get("fileSearch", {})),
             rewrite=RewriteConfig.from_dict(data.get("rewrite", {})),
         )
@@ -264,6 +286,7 @@ class GhostwriterConfig:
         return {
             "version": self.version,
             "ui": self.ui.to_dict(),
+            "promptTemplates": self.prompt_templates.to_dict(),
             "fileSearch": self.file_search.to_dict(),
             "rewrite": self.rewrite.to_dict(),
         }
@@ -286,8 +309,8 @@ def validate_prompt_template(template: str) -> None:
         raise ValueError("rewrite.prompt must contain the {text} placeholder")
 
 
-def open_config_file(path: Path) -> None:
-    """Open a config file with the desktop's default associated editor."""
+def open_desktop_path(path: Path) -> None:
+    """Open an existing file or directory with the desktop's default application."""
     path = path.expanduser().resolve(strict=True)
     if sys.platform == "win32":
         startfile = getattr(os, "startfile", None)
@@ -309,6 +332,11 @@ def open_config_file(path: Path) -> None:
     )
 
 
+def open_config_file(path: Path) -> None:
+    """Open the Ghostwriter config in its associated desktop editor."""
+    open_desktop_path(path)
+
+
 class ConfigStore:
     def __init__(self, path: Path | None = None) -> None:
         self.path = path or user_config_path("ghostwriter") / "config.json"
@@ -320,11 +348,25 @@ class ConfigStore:
 
     def load(self) -> GhostwriterConfig:
         self.recovered_path = None
+        default_prompts = self.path.parent / "prompts"
         try:
-            config = self.reload()
+            data = json.loads(self.path.read_text(encoding="utf-8"))
+            needs_prompt_config = isinstance(data, dict) and "promptTemplates" not in data
+            if needs_prompt_config:
+                data = {
+                    **data,
+                    "promptTemplates": {"directory": str(default_prompts)},
+                }
+            config = GhostwriterConfig.from_dict(data)
+            if needs_prompt_config:
+                self.save(config)
+                self._create_prompt_directory(default_prompts)
         except FileNotFoundError:
-            config = GhostwriterConfig()
+            config = GhostwriterConfig(
+                prompt_templates=PromptTemplateConfig(directory=default_prompts)
+            )
             self.save(config)
+            self._create_prompt_directory(default_prompts)
         except (TypeError, ValueError, json.JSONDecodeError):
             broken = self.path.with_suffix(f".broken-{os.getpid()}.json")
             try:
@@ -332,9 +374,16 @@ class ConfigStore:
                 self.recovered_path = broken
             except OSError:
                 pass
-            config = GhostwriterConfig()
+            config = GhostwriterConfig(
+                prompt_templates=PromptTemplateConfig(directory=default_prompts)
+            )
             self.save(config)
+            self._create_prompt_directory(default_prompts)
         return config
+
+    @staticmethod
+    def _create_prompt_directory(path: Path) -> None:
+        path.mkdir(parents=True, exist_ok=True, mode=0o700)
 
     def save(self, config: GhostwriterConfig) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)

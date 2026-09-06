@@ -12,7 +12,7 @@ Compose in Ghostwriter  ── Ctrl+Enter ──▶  Review in Pi  ── Enter 
 
 | Compose comfortably | Bring the right context | Stay in control |
 | --- | --- | --- |
-| Mouse editing, selection, clipboard, undo/redo, soft wrapping, and persistent drafts | Drag files, preview images and text, search files or folders with `@`, and complete `/skill:<name>` anywhere | Local socket injection replaces only unsent editor text; no synthetic typing and no automatic submission |
+| Mouse editing, selection, clipboard, undo/redo, soft wrapping, persistent drafts, and reusable Prompt templates | Drag files, preview images and text, search files or folders with `@`, and complete `/skill:<name>` anywhere | Local socket injection replaces only unsent editor text; no synthetic typing and no automatic submission |
 
 ## Quick start
 
@@ -46,7 +46,7 @@ For a development-only checkout that does not install the command or modify Pi s
 
 Drag files into the editor, choose **Attach**, paste a local path, or type `@` to search the selected Pi project immediately. After three filename characters, Ghostwriter also searches the operating system's indexed files and folders, so typing `@bug1` can find `~/Desktop/bug1-2.png` without a full path. Project matches always appear first, including paths hidden by Git's local excludes.
 
-By default, an attached path inside Pi's working directory gets a compact marker such as `@design.md` or `@notes/`; a path outside it shows its absolute path. Set `fileSearch.pathDisplay` to `full` to show absolute paths for both. Ghostwriter keeps the original path in place rather than copying it. Text and images can be previewed locally; at injection time the marker becomes Pi's normal path syntax:
+By default, an attached path inside Pi's working directory is shown relative to that directory, such as `@docs/design.md` or `@notes/`; a path outside it shows its absolute path. Set `fileSearch.pathDisplay` to `full` to show absolute paths for both. Ghostwriter keeps the original path in place rather than copying it. Text and images can be previewed locally; at injection time the marker becomes Pi's normal path syntax:
 
 ```text
 @src/example.ts
@@ -57,6 +57,26 @@ Deleting the final marker removes the attachment automatically. You can also sel
 
 `fd` and `fzf` improve project indexing and fuzzy ranking when installed, but neither is required. A bounded Python fallback handles project search. Whole-computer name search uses the macOS Spotlight index or `locate` on other Unix systems when available.
 
+### Prompt templates
+
+Ghostwriter reads simple Markdown Prompt templates from the directory configured at `promptTemplates.directory`. The default is Ghostwriter's own `prompts` directory beside `config.json`, so it does not collide with Pi's default. You may point it at `~/.pi/agent/prompts`. Each template needs a single-line `name`; `description` is optional and may be blank:
+
+```markdown
+---
+name: review
+description: Review the current draft
+---
+Review this carefully.
+
+Preserve important details.
+```
+
+Choose **Prompts** to browse templates by bold name and description. **Insert** adds a highlighted `/prompt:<name>` reference such as `/prompt:review` at the cursor, **Expand** replaces every inserted reference in place, and **Open folder** opens the configured template directory. Use **Settings → Refresh** after adding or deleting templates; `F3` performs expansion directly.
+
+The inline workflow mirrors Skill insertion: type `/prompt:` followed by part of a template name, then choose a match with Tab or a click. Add as many references as needed and arrange them within the draft before expanding them. Body line breaks and surrounding draft text are preserved.
+
+Template bodies are inserted literally. Ghostwriter deliberately does not interpret Pi argument placeholders such as `$1` or `${@:2}` because Pi has no supported extension hook that exposes its post-expansion text without starting an Agent turn. Discovery is non-recursive.
+
 ### Skills
 
 Type `/skill` or `/skill:<partial-name>` after whitespace anywhere in your draft. Ghostwriter shows the Skills loaded by the selected Pi session, including a short description, and lets you complete the highlighted result with Tab or a click.
@@ -65,7 +85,7 @@ Type `/skill` or `/skill:<partial-name>` after whitespace anywhere in your draft
 First review the architecture, then use /skill:teaching for the explanation.
 ```
 
-The inserted `/skill:<name>` remains ordinary prompt text and is highlighted for readability. There is no separate checkbox or preview. If Pi's Skills or working-directory files change, press `Ctrl+R` to refresh targets, Skills, and file completion.
+The inserted `/skill:<name>` remains ordinary prompt text and is highlighted for readability. There is no separate checkbox or preview. Press `Ctrl+R` after changing Prompt templates, Pi Skills, or working-directory files.
 
 Pi expands a Skill command normally when it begins the submitted input and Skill commands are enabled. When it appears later in a sentence, the explicit syntax remains visible to the Agent so it can select the matching Skill instructions.
 
@@ -85,13 +105,15 @@ See [`docs/rewrite.md`](docs/rewrite.md) for isolation, placeholder integrity, a
 | --- | --- |
 | `Ctrl+Enter` | Replace the selected Pi session's unsent editor text |
 | `Ctrl+O` | Choose one or more attachments |
-| `Ctrl+R` | Refresh Pi targets, Skills, and the project file index |
+| `Ctrl+R` | Refresh Pi targets, Prompt templates, Skills, and the project file index |
 | `Ctrl+S` | Save the current draft |
+| `F3` | Expand all Prompt-template references directly |
 | `F4` | Open Translate / Tidy |
 | `Ctrl+Q` | Quit |
 | `Up` / `Down` | Move through an open completion list |
-| `Tab` | Accept the highlighted `@` or `/skill:` completion |
-| `Escape` | Close the completion list |
+| `Tab` | Accept the highlighted `@`, `/prompt:`, or `/skill:` completion |
+| `Escape` | Close the completion list or cancel a dialog |
+
 
 Text editing, selection, clipboard, and history shortcuts come from Textual's `TextArea`.
 
@@ -107,7 +129,7 @@ Ghostwriter has a deliberately narrow job: prepare a prompt and place it in Pi's
 
 ## Configuration
 
-Choose **Settings → Open config** to edit Ghostwriter's generated JSON configuration. It controls the persistent theme, file search, rewrite models, target languages, standing instructions, custom prompts, and optional RPC warm-up. Theme choices are saved immediately. **Refresh** applies other manual edits and refreshes Pi targets, Skills, and file-search indexes.
+Choose **Settings → Open config** to edit Ghostwriter's generated JSON configuration. It controls the persistent theme, Prompt-template directory, file search, rewrite models, target languages, standing instructions, custom rewrite prompts, and optional RPC warm-up. Theme choices are saved immediately. **Refresh** applies other manual edits and refreshes Pi targets, Prompt templates, Skills, and file-search indexes.
 
 See [`docs/configuration.md`](docs/configuration.md) for the configuration format and examples.
 
