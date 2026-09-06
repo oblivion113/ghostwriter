@@ -6,7 +6,7 @@ Ghostwriter creates `config.json` on first start using the platform's normal use
 ~/Library/Application Support/ghostwriter/config.json
 ```
 
-The simplest way to find and edit it is **Settings → Open config**. Save the file, return to Ghostwriter, and choose **Reload config**. Opening the Rewrite dialog also reloads the file automatically.
+The simplest way to find and edit it is **Settings → Open config**. Save the file, return to Ghostwriter, and choose **Refresh**. This also refreshes Pi targets, Skills, and file-search indexes, so files created after launch become immediately searchable. Opening the Rewrite dialog reloads configuration only.
 
 ## Structure
 
@@ -113,6 +113,6 @@ Ghostwriter validates placeholder integrity locally, but clear model instruction
 
 ## Reloading and recovery
 
-A failed manual reload leaves the edited file untouched and keeps the last valid in-memory configuration. Ghostwriter reports the error so you can correct the same file.
+A failed manual reload leaves the edited file untouched and keeps the last valid in-memory configuration. Ghostwriter reports the error so you can correct the same file. A successful **Refresh** also rebuilds runtime discovery state: Pi targets, Skills, the project file index, and cached whole-computer results.
 
 If the configuration is malformed during application startup, Ghostwriter moves it to `config.broken-<pid>.json` and creates a safe default replacement. JSON comments are not supported, so avoid `//` and `#` annotations.

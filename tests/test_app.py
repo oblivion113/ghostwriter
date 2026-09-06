@@ -397,7 +397,7 @@ def test_command_palette_omits_screenshot_and_only_offers_comfortable_themes() -
     }
 
     assert "Screenshot" not in command_titles
-    assert {"Open config", "Reload config", "Theme", "Quit", "Keys"} <= command_titles
+    assert {"Open config", "Refresh", "Theme", "Quit", "Keys"} <= command_titles
     assert set(app.available_themes) == set(app.COMFORTABLE_THEMES)
     assert all(theme.dark for theme in app.available_themes.values())
 
@@ -468,34 +468,60 @@ async def test_prompt_wraps_mixed_cjk_text_without_a_phantom_newline(tmp_path: P
 
 
 @pytest.mark.asyncio
-async def test_header_opens_full_settings_menu_with_title_on_right(tmp_path: Path) -> None:
+async def test_header_only_shows_settings_menu(tmp_path: Path) -> None:
     app = GhostwriterApp()
     app.store = DraftStore(tmp_path / "draft.json")
     opened: list[bool] = []
     reloaded: list[bool] = []
+    refreshed: list[bool] = []
     app._open_config = lambda: opened.append(True)  # type: ignore[method-assign]
     app._reload_config = lambda: reloaded.append(True)  # type: ignore[method-assign]
 
     async with app.run_test(size=(120, 40)) as pilot:
         top_bar = app.query_one("#top-bar")
         settings = app.query_one("#settings-menu")
-        title = app.query_one("#app-title")
 
         assert settings.label.plain == "Settings"
         assert settings.region.x == top_bar.region.x
-        assert title.render() == "Ghostwriter"
-        assert title.region.right == top_bar.region.right
+        assert not app.query("#app-title")
         assert not app.query("Header")
 
+        app.action_refresh_targets = lambda: refreshed.append(True)  # type: ignore[method-assign]
         commands = {command.title: command for command in app.get_system_commands(app.screen)}
         commands["Open config"].callback()
-        commands["Reload config"].callback()
+        commands["Refresh"].callback()
         assert opened == [True]
         assert reloaded == [True]
+        assert refreshed == [True]
 
         await pilot.click("#settings-menu")
         await pilot.pause()
         assert isinstance(app.screen, CommandPalette)
+
+
+@pytest.mark.asyncio
+async def test_refresh_command_rebuilds_file_index(tmp_path: Path) -> None:
+    app = GhostwriterApp(config_store=ConfigStore(tmp_path / "config.json"))
+    app.draft = Draft(text="")
+    app.store = DraftStore(tmp_path / "draft.json")
+    app.pi.discover_targets = list  # type: ignore[method-assign]
+
+    async with app.run_test(size=(120, 40)):
+        app._project_root = lambda: tmp_path
+        app._file_index_root = tmp_path
+        app._file_index = []
+        added = tmp_path / "added-after-launch.md"
+        added.touch()
+
+        app._reload_config_command()
+        editor = app.query_one("#prompt-editor")
+        editor.load_text("@added-after")
+        editor.cursor_location = (0, len(editor.text))
+        app._update_file_completions()
+
+        options = app.query_one("#prompt-completions")
+        assert options.display
+        assert options.options[0].prompt == "added-after-launch.md"
 
 
 @pytest.mark.asyncio
@@ -536,6 +562,7 @@ async def test_layout_uses_aspect_ratio_and_splitter_is_draggable(tmp_path: Path
     app.store = DraftStore(tmp_path / "draft.json")
 
     async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
         assert not app.screen.has_class("stacked")
         original_width = app._horizontal_split
         original_height = app._prompt_split
@@ -555,6 +582,20 @@ async def test_layout_uses_aspect_ratio_and_splitter_is_draggable(tmp_path: Path
         await pilot.pause()
         assert app._prompt_split < original_height
         assert app.query_one("#prompt-region").size.height < original_prompt_cells
+
+    compact_app = GhostwriterApp()
+    compact_app.draft = Draft(text="")
+    compact_app.store = DraftStore(tmp_path / "compact-draft.json")
+    async with compact_app.run_test(size=(95, 40)) as pilot:
+        await pilot.pause()
+        workspace = compact_app.query_one("#workspace")
+        side_pane = compact_app.query_one("#side-pane")
+        refresh = compact_app.query_one("#refresh-targets")
+
+        assert not compact_app.screen.has_class("stacked")
+        assert workspace.max_scroll_x == 0
+        assert side_pane.region.right <= workspace.content_region.right
+        assert refresh.region.right <= workspace.content_region.right
 
     tall_app = GhostwriterApp()
     tall_app.draft = Draft(text="")

@@ -65,7 +65,7 @@ Type `/skill` or `/skill:<partial-name>` after whitespace anywhere in your draft
 First review the architecture, then use /skill:teaching for the explanation.
 ```
 
-The inserted `/skill:<name>` remains ordinary prompt text and is highlighted for readability. There is no separate checkbox or preview. If Pi's Skills change, press `Ctrl+R` to refresh the selected target's metadata.
+The inserted `/skill:<name>` remains ordinary prompt text and is highlighted for readability. There is no separate checkbox or preview. If Pi's Skills or working-directory files change, press `Ctrl+R` to refresh targets, Skills, and file completion.
 
 Pi expands a Skill command normally when it begins the submitted input and Skill commands are enabled. When it appears later in a sentence, the explicit syntax remains visible to the Agent so it can select the matching Skill instructions.
 
@@ -85,7 +85,7 @@ See [`docs/rewrite.md`](docs/rewrite.md) for isolation, placeholder integrity, a
 | --- | --- |
 | `Ctrl+Enter` | Replace the selected Pi session's unsent editor text |
 | `Ctrl+O` | Choose one or more attachments |
-| `Ctrl+R` | Refresh Pi targets and their Skills |
+| `Ctrl+R` | Refresh Pi targets, Skills, and the project file index |
 | `Ctrl+S` | Save the current draft |
 | `F4` | Open Translate / Tidy |
 | `Ctrl+Q` | Quit |
@@ -107,7 +107,7 @@ Ghostwriter has a deliberately narrow job: prepare a prompt and place it in Pi's
 
 ## Configuration
 
-Choose **Settings → Open config** to edit Ghostwriter's generated JSON configuration. It controls the persistent theme, file search, rewrite models, target languages, standing instructions, custom prompts, and optional RPC warm-up. Theme choices are saved immediately; reload other manual edits from Ghostwriter after saving.
+Choose **Settings → Open config** to edit Ghostwriter's generated JSON configuration. It controls the persistent theme, file search, rewrite models, target languages, standing instructions, custom prompts, and optional RPC warm-up. Theme choices are saved immediately. **Refresh** applies other manual edits and refreshes Pi targets, Skills, and file-search indexes.
 
 See [`docs/configuration.md`](docs/configuration.md) for the configuration format and examples.
 

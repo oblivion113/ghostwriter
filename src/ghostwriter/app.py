@@ -13,7 +13,7 @@ from textual import events, on
 from textual.app import App, ComposeResult, SystemCommand
 from textual.binding import Binding
 from textual.command import CommandPalette
-from textual.containers import Grid, Horizontal, Vertical, VerticalScroll
+from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.document._document_navigator import DocumentNavigator
 from textual.events import Resize
 from textual.message import Message
@@ -77,6 +77,9 @@ FILE_COMPLETION_PATTERN = re.compile(r"(?<!\S)@([^\s]*)$")
 MAX_SYSTEM_COMPLETION_CACHE = 128
 SYSTEM_COMPLETION_DEBOUNCE = 0.12
 SYSTEM_COMPLETION_WORKER_GROUP = "system-file-completion"
+MIN_EDITOR_PANE_WIDTH = 56
+MIN_SIDE_PANE_WIDTH = 30
+WIDTH_HANDLE_SIZE = 1
 
 
 class DragHandle(Static):
@@ -192,7 +195,7 @@ class CurrentThemeProvider(ThemeProvider):
 
 
 class GhostwriterApp(App[None]):
-    TITLE = "Ghostwriter"
+    TITLE = ""
     SUB_TITLE = ""
     NO_TARGET_ID = "__no-active-pi-session__"
     NO_TARGET_LABEL = "No active Pi session"
@@ -202,7 +205,7 @@ class GhostwriterApp(App[None]):
     BINDINGS: ClassVar[list[Binding]] = [
         Binding("ctrl+enter", "inject", "Inject into Pi", priority=True),
         Binding("ctrl+o", "choose_file", "Attach files"),
-        Binding("ctrl+r", "refresh_targets", "Refresh Pi targets"),
+        Binding("ctrl+r", "refresh_targets", "Refresh targets and files"),
         Binding("ctrl+s", "save", "Save draft"),
         Binding("f4", "rewrite", "Translate / tidy"),
         Binding("ctrl+q", "quit", "Quit"),
@@ -258,8 +261,8 @@ class GhostwriterApp(App[None]):
             self._open_config_command,
         )
         yield SystemCommand(
-            "Reload config",
-            "Reload Ghostwriter's configuration from disk",
+            "Refresh",
+            "Reload configuration and refresh targets, Skills, and file search",
             self._reload_config_command,
         )
         yield from (
@@ -277,14 +280,13 @@ class GhostwriterApp(App[None]):
         )
 
     def compose(self) -> ComposeResult:
-        with Grid(id="top-bar"):
+        with Horizontal(id="top-bar"):
             yield Button(
                 "Settings",
                 id="settings-menu",
                 compact=True,
                 flat=True,
             )
-            yield Label(self.TITLE, id="app-title")
         with Horizontal(id="workspace"):
             with Vertical(id="editor-pane"):
                 yield Label("PROMPT", classes="section-title")
@@ -349,7 +351,7 @@ class GhostwriterApp(App[None]):
                         classes="tool-button icon-button",
                         compact=True,
                         flat=True,
-                        tooltip="Refresh Pi targets (Ctrl+R)",
+                        tooltip="Refresh Pi targets, Skills, and files (Ctrl+R)",
                     )
                 yield Label("ATTACHMENTS", classes="section-title")
                 yield DataTable(id="attachments", cursor_type="row")
@@ -437,16 +439,17 @@ class GhostwriterApp(App[None]):
         except OSError as error:
             self.notify(f"Could not open config: {error}", severity="error")
         else:
-            self.notify("Config opened. Save it, then choose Reload config.")
+            self.notify("Config opened. Save it, then choose Refresh.")
 
     def _reload_config_command(self) -> None:
         try:
             self._reload_config()
         except (OSError, TypeError, ValueError) as error:
-            self.notify(f"Could not reload config: {error}", severity="error")
+            self.notify(f"Could not refresh: {error}", severity="error")
         else:
-            self._set_status("Config reloaded")
-            self.notify("Config reloaded")
+            self.action_refresh_targets()
+            self._set_status("Application refreshed")
+            self.notify("Config, Pi targets, Skills, and file search refreshed")
 
     def _reload_config(self) -> RewriteConfig:
         previous_rewrite = self.config.rewrite
@@ -892,6 +895,7 @@ class GhostwriterApp(App[None]):
         editor.focus()
 
     def _apply_split(self) -> None:
+        workspace = self.query_one("#workspace", Horizontal)
         editor = self.query_one("#editor-pane", Vertical)
         prompt = self.query_one("#prompt-region", Vertical)
         side = self.query_one("#side-pane", VerticalScroll)
@@ -906,7 +910,14 @@ class GhostwriterApp(App[None]):
             side.styles.width = "1fr"
             side.styles.height = "1fr"
         else:
-            editor.styles.width = f"{self._horizontal_split * 100:.1f}%"
+            available_width = workspace.size.width
+            desired_editor_width = round(available_width * self._horizontal_split)
+            # Reserve the side pane and divider before applying the requested split.
+            maximum_editor_width = max(
+                MIN_EDITOR_PANE_WIDTH,
+                available_width - MIN_SIDE_PANE_WIDTH - WIDTH_HANDLE_SIZE,
+            )
+            editor.styles.width = min(desired_editor_width, maximum_editor_width)
             editor.styles.height = "1fr"
             side.styles.width = "1fr"
             side.styles.height = "1fr"

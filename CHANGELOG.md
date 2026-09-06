@@ -4,6 +4,7 @@ All notable changes to Ghostwriter will be documented here. The project follows 
 
 ## Unreleased
 
+- Prevented the horizontal split from pushing the side pane beyond the viewport, removed the redundant app-name header, and renamed **Reload config** to **Refresh**; the broader command also refreshes targets, Skills, and file indexes.
 - Expanded `@` completion to the operating system's file index, with selected-project matches first plus debounced, bounded, and cancellable background searches.
 - Added configurable attachment path display: compact names inside Pi's working directory and absolute paths outside by default, or full paths everywhere.
 - Fixed crashes from incomplete `~` path expressions and restored additional `@` completions on the same prompt line.
@@ -22,7 +23,7 @@ All notable changes to Ghostwriter will be documented here. The project follows 
 - Removed SVG screenshot export, limited themes to comfortable dark palettes, kept prompt prose white, and highlighted attachment markers in the editor.
 - Forced a full Pi repaint after injection so changed line prefixes and wrapping no longer leave stale editor cells.
 - Kept attachment markers highlighted on the active line and added natural wrapping for mixed CJK prose without changing the saved text.
-- Replaced the clock and subtitle header with a left-aligned Settings command menu and right-aligned Ghostwriter title; configuration actions join the original Theme, Keys, Quit, and layout commands.
+- Replaced the clock and subtitle header with a compact Settings command menu; configuration actions join the original Theme, Keys, Quit, and layout commands.
 
 ## 0.2.0 - 2026-08-29
 

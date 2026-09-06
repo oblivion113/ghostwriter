@@ -64,7 +64,7 @@ The selected Pi session's working directory is the project root. `files.py` pref
 
 After three filename characters and a 120 ms debounce, a thread worker queries the operating system's existing file index: Spotlight through `mdfind` on macOS or `locate` on other Unix systems. Search output is streamed with a 20,000-path cap instead of being captured without a bound. Results inside the project are removed, skipped and hidden directory policy is applied, and the candidate set is passed through the same ranker. Project candidates are displayed immediately and remain ahead of system candidates. New input cancels stale workers and terminates their index processes; a bounded session cache makes backspacing instant.
 
-`fzf --filter` performs path-aware fuzzy ranking for both candidate sources, with a bounded-memory Python fallback for the project when unavailable. Global fzf options are inherited unless disabled in `fileSearch`. Queries beginning with `/` or a valid `~` expression use direct filesystem completion; incomplete expressions remain ordinary editable queries instead of raising from `Path.expanduser()`.
+`fzf --filter` performs path-aware fuzzy ranking for both candidate sources, with a bounded-memory Python fallback for the project when unavailable. Global fzf options are inherited unless disabled in `fileSearch`. Queries beginning with `/` or a valid `~` expression use direct filesystem completion; incomplete expressions remain ordinary editable queries instead of raising from `Path.expanduser()`. `Ctrl+R` and **Refresh** both invalidate these indexes and rediscover Pi target and Skill metadata.
 
 The Pi extension obtains loaded skills from `pi.getCommands()` and publishes only each name and description in the target registry. Ghostwriter filters that small in-memory list when `/skill` or `/skill:<partial-name>` appears immediately before the cursor after whitespace, including in the middle of a larger prompt. Descriptions are normalized for a one-line secondary label; no skill document is opened. Tab accepts the highlighted file or skill candidate.
 
@@ -95,7 +95,7 @@ Textual owns terminal rendering and input. Important custom behavior includes:
 - filtered system commands: removes Textual's SVG screenshot export from the command palette;
 - async workers: perform socket injection and Pi RPC communication.
 
-The app switches between side-by-side and stacked layouts using terminal width and aspect ratio. TextArea supplies clipboard handling, history, selection, soft wrapping, and vertical scrolling.
+The app switches between side-by-side and stacked layouts using terminal width and aspect ratio. In horizontal mode, the requested editor split is clamped so the divider and the side pane's 30-cell minimum always remain inside the workspace viewport. The top bar contains only the Settings menu. TextArea supplies clipboard handling, history, selection, soft wrapping, and vertical scrolling.
 
 ## Persistence and runtime files
 

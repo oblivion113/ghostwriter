@@ -47,7 +47,7 @@ On first start, Ghostwriter writes `config.json` under `user_config_path("ghostw
 The Rewrite dialog provides two configuration controls:
 
 1. **Open config** launches the JSON file through the operating system's default associated editor.
-2. **Reload config** validates the saved file and repopulates both dropdowns without restarting Ghostwriter.
+2. **Refresh** validates the saved file, repopulates both dropdowns, and refreshes targets, Skills, and file search without restarting Ghostwriter.
 
 The file is also reloaded immediately before each Rewrite dialog opens. A failed manual reload leaves the edited file untouched and keeps the last valid in-memory settings, so the user can correct it. A malformed file found during app startup is instead moved aside as `config.broken-<pid>.json` and replaced with safe defaults.
 
@@ -69,7 +69,7 @@ The generated default prompt treats attachment placeholders as immutable, tells 
 2. Choose translation and/or tidying.
 3. Set source and target languages.
 4. Choose a rewrite agent from the configured dropdown.
-5. If needed, select **Open config**, save edits, and select **Reload config**.
+5. If needed, select **Open config**, save edits, and select **Refresh**.
 6. Select **Run** or press `Ctrl+Enter`; the RPC starts on demand unless warm mode is enabled.
 7. Review the returned draft.
 8. Accept, reject, edit directly, or provide revision feedback. Revisions reuse the same live RPC conversation.
